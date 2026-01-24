@@ -212,9 +212,6 @@ cluster_in_topic_space <- function(topic_cell, true_celltypes,
 #' @param seed Random seed
 #' @param save.models Save intermediate models (default: FALSE)
 #' @param out.dir Output directory for models
-#' @param backend Computational backend: "auto", "python", or "r" (default: "auto").
-#'   When "auto", uses Python gensim if available for exact equivalence
-#'   with the original STRIDE implementation.
 #'
 #' @return A list containing:
 #'   \itemize{
@@ -233,22 +230,9 @@ cluster_in_topic_space <- function(topic_cell, true_celltypes,
 evaluate_topic_range <- function(matrix, celltypes, topic_range,
                                   methods = c("Raw", "Norm", "NormBySD", "Bayes", "BayesNorm"),
                                   n.iter = 500, seed = 42,
-                                  save.models = FALSE, out.dir = NULL,
-                                  backend = "auto") {
+                                  save.models = FALSE, out.dir = NULL) {
   
   vmessage("Evaluating ", length(topic_range), " topic configurations...")
-  
-  # Select backend
-  if (backend == "auto") {
-    backend <- if (check_python_backend(c("gensim", "numpy"))) "python" else "r"
-  }
-  
-  # Select training function based on backend
-  train_lda_fn <- if (backend == "python" && check_python_backend(c("gensim", "numpy"))) {
-    train_lda_gensim
-  } else {
-    train_lda
-  }
   
   # Store results
   all_metrics <- list()
@@ -263,7 +247,7 @@ evaluate_topic_range <- function(matrix, celltypes, topic_range,
     vmessage("\n=== Number of topics: ", n_topics, " ===")
     
     # Train model
-    model <- train_lda_fn(matrix, n.topics = n_topics, n.iter = n.iter, seed = seed)
+    model <- train_lda(matrix, n.topics = n_topics, n.iter = n.iter, seed = seed)
     
     # Calculate topic-celltype association
     topic_celltype <- calculate_topic_celltype(model$topic_cell, celltypes)

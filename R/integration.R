@@ -22,9 +22,6 @@ NULL
 #' @param reg Sinkhorn regularization parameter (default: 0.1)
 #' @param max.iter Maximum iterations for FGW (default: 100)
 #' @param seed Random seed
-#' @param backend Computational backend: "auto", "python", or "r" (default: "auto").
-#'   When "auto", uses Python POT library if available for exact equivalence
-#'   with the original STRIDE implementation.
 #'
 #' @return A list containing:
 #'   \itemize{
@@ -58,8 +55,7 @@ NULL
 #' }
 integrate_samples <- function(deconv.list, topic.list, coords.list,
                                sample.ids = NULL, alpha = 0.5, reg = 0.1,
-                               max.iter = 100, seed = 42,
-                               backend = "auto") {
+                               max.iter = 100, seed = 42) {
   
   vmessage("=== Integrating Multiple Samples ===")
   set.seed(seed)
@@ -73,19 +69,6 @@ integrate_samples <- function(deconv.list, topic.list, coords.list,
   # Validate inputs
   if (length(topic.list) != n_samples || length(coords.list) != n_samples) {
     rlang::abort("All input lists must have the same length")
-  }
-  
-  # Determine backend
-  if (backend == "auto") {
-    backend <- if (check_python_backend("ot")) "python" else "r"
-  }
-  vmessage("Backend: ", backend)
-  
-  # Select alignment function
-  align_fn <- if (backend == "python" && check_python_backend("ot")) {
-    align_samples_pot
-  } else {
-    align_samples
   }
   
   # Generate sample IDs if not provided
@@ -130,12 +113,14 @@ integrate_samples <- function(deconv.list, topic.list, coords.list,
     s2_coords <- as.data.frame(coords.list[[i]])
     
     # Align samples using FGW
-    alignment <- align_fn(
+    alignment <- align_samples(
       topic1 = s1_topic,
       topic2 = s2_topic,
       coords1 = s1_coords,
       coords2 = s2_coords,
-      alpha = alpha
+      alpha = alpha,
+      reg = reg,
+      max.iter = max.iter
     )
     
     # Update cumulative rotation

@@ -41,9 +41,6 @@ NULL
 #' @param out.dir Output directory (default: ".")
 #' @param out.prefix Output file prefix (default: "STRIDER")
 #' @param save.model Save trained model (default: TRUE)
-#' @param backend Computational backend: "auto", "python", or "r" (default: "auto").
-#'   When "auto", uses Python backend (gensim, POT, scanpy) if available for
-#'   exact equivalence with the original STRIDE implementation.
 #'
 #' @return A STRIDER object containing:
 #'   \itemize{
@@ -96,18 +93,10 @@ run_strider <- function(sc.data, st.data, sc.celltype,
                         normalize = FALSE, n.markers = 200,
                         lda.iter = 500, seed = 42,
                         out.dir = ".", out.prefix = "STRIDER",
-                        save.model = TRUE,
-                        backend = "auto") {
+                        save.model = TRUE) {
   
   vmessage("=== STRIDER Cell Type Deconvolution ===")
   vmessage("Author: Zaoqu Liu (liuzaoqu@163.com)")
-  vmessage("")
-  
-  # Determine backend
-  if (backend == "auto") {
-    backend <- if (check_python_backend(c("gensim", "numpy"))) "python" else "r"
-  }
-  vmessage("Backend: ", backend)
   vmessage("")
   
   set_seed(seed)
@@ -156,19 +145,11 @@ run_strider <- function(sc.data, st.data, sc.celltype,
   
   if (is.null(gene.use)) {
     # Find marker genes using differential expression
-    if (backend == "python" && check_python_backend("scanpy")) {
-      marker_result <- find_markers_scanpy(
-        sc_processed$raw_matrix,
-        sc_processed$celltypes,
-        n.top = n.markers
-      )
-    } else {
-      marker_result <- find_markers(
-        sc_processed$raw_matrix,
-        sc_processed$celltypes,
-        n.top = n.markers
-      )
-    }
+    marker_result <- find_markers(
+      sc_processed$raw_matrix,
+      sc_processed$celltypes,
+      n.top = n.markers
+    )
     genes_use <- marker_result$top_markers
     vmessage("  Identified ", length(genes_use), " marker genes")
   } else if (identical(gene.use, "All")) {
@@ -207,13 +188,6 @@ run_strider <- function(sc.data, st.data, sc.celltype,
   # ===== Step 7: Train and evaluate models =====
   vmessage("\nStep 6: Training and evaluating LDA models...")
   
-  # Select LDA training function based on backend
-  train_lda_fn <- if (backend == "python" && check_python_backend(c("gensim", "numpy"))) {
-    train_lda_gensim
-  } else {
-    train_lda
-  }
-  
   if (length(n.topics) > 1) {
     eval_results <- evaluate_topic_range(
       sc_matrix_use,
@@ -222,8 +196,7 @@ run_strider <- function(sc.data, st.data, sc.celltype,
       n.iter = lda.iter,
       seed = seed,
       save.models = save.model,
-      out.dir = out.dir,
-      backend = backend
+      out.dir = out.dir
     )
     
     best_model_info <- select_best_model(eval_results)
@@ -236,7 +209,7 @@ run_strider <- function(sc.data, st.data, sc.celltype,
     
   } else {
     # Train single model
-    model <- train_lda_fn(sc_matrix_use, n.topics = n.topics, n.iter = lda.iter, seed = seed)
+    model <- train_lda(sc_matrix_use, n.topics = n.topics, n.iter = lda.iter, seed = seed)
     
     topic_celltype <- calculate_topic_celltype(model$topic_cell, sc_processed$celltypes)
     

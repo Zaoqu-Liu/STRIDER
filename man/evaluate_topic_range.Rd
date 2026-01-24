@@ -12,8 +12,7 @@ evaluate_topic_range(
   n.iter = 500,
   seed = 42,
   save.models = FALSE,
-  out.dir = NULL,
-  backend = "auto"
+  out.dir = NULL
 )
 }
 \arguments{
@@ -32,10 +31,6 @@ evaluate_topic_range(
 \item{save.models}{Save intermediate models (default: FALSE)}
 
 \item{out.dir}{Output directory for models}
-
-\item{backend}{Computational backend: "auto", "python", or "r" (default: "auto").
-When "auto", uses Python gensim if available for exact equivalence
-with the original STRIDE implementation.}
 }
 \value{
 A list containing:
