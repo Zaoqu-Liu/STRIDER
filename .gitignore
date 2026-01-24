@@ -1,0 +1,56 @@
+# R build artifacts
+*.o
+*.so
+*.dll
+src/*.o
+src/*.so
+src/*.dll
+
+# Package build artifacts
+*.tar.gz
+*.Rcheck/
+.Rproj.user
+
+# IDE files
+.Rhistory
+.RData
+.Ruserdata
+*.Rproj
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Linux
+*~
+
+# Compiled documentation
+docs/
+doc/
+Meta/
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+
+# Coverage reports
+coverage/
+*.gcov
+*.gcno
+*.gcda
+
+# Logs
+*.log
+
+# Test artifacts
+tests/testthat/_snaps/
+
+# Temporary files
+*.tmp
+*.temp

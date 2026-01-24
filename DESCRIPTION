@@ -1,0 +1,67 @@
+Package: STRIDER
+Type: Package
+Title: Spatial Transcriptomics Deconvolution by Topic Modeling in R
+Version: 1.0.0
+Date: 2024-01-25
+Authors@R: c(
+    person("Zaoqu", "Liu", email = "liuzaoqu@163.com", role = c("aut", "cre"),
+           comment = c(ORCID = "0000-0002-0452-742X")),
+    person("Dongqing", "Sun", role = "ctb", comment = "Original STRIDE Python implementation")
+    )
+Description: STRIDER (Spatial TRanscrIptomics DEconvolution in R) is a comprehensive 
+    R implementation for cell-type deconvolution of spatial transcriptomics data using 
+    topic modeling (LDA). It integrates single-cell RNA-seq reference data to decompose 
+    cell-type proportions in spatial spots, with support for multi-sample integration 
+    using Fused Gromov-Wasserstein optimal transport, neighborhood-aware clustering, 
+    and spot-to-cell mapping.
+License: MIT + file LICENSE
+URL: https://github.com/Zaoqu-Liu/STRIDER
+BugReports: https://github.com/Zaoqu-Liu/STRIDER/issues
+Encoding: UTF-8
+LazyData: true
+Depends: 
+    R (>= 4.0.0)
+Imports:
+    Matrix,
+    methods,
+    stats,
+    utils,
+    Rcpp (>= 1.0.0),
+    data.table,
+    ggplot2,
+    scales,
+    RColorBrewer,
+    viridis,
+    scatterpie,
+    patchwork,
+    text2vec,
+    FNN,
+    irlba,
+    uwot,
+    future,
+    future.apply,
+    progressr,
+    cli,
+    rlang
+Suggests:
+    Seurat (>= 4.0.0),
+    SeuratObject,
+    hdf5r,
+    rhdf5,
+    SingleCellExperiment,
+    SummarizedExperiment,
+    presto,
+    testthat (>= 3.0.0),
+    knitr,
+    rmarkdown,
+    BiocStyle
+LinkingTo:
+    Rcpp,
+    RcppArmadillo
+RoxygenNote: 7.3.0
+VignetteBuilder: knitr
+Config/testthat/edition: 3
+Roxygen: list(markdown = TRUE)
+SystemRequirements: C++11
+NeedsCompilation: yes
+Biarch: true
