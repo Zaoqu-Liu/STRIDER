@@ -1,4 +1,4 @@
-# STRIDER <img src="man/figures/logo.png" align="right" height="139" alt="STRIDER logo" />
+# STRIDER
 
 <!-- badges: start -->
 [![R-universe](https://zaoqu-liu.r-universe.dev/badges/STRIDER)](https://zaoqu-liu.r-universe.dev/STRIDER)
