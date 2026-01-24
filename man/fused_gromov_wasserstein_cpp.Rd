@@ -27,7 +27,7 @@ fused_gromov_wasserstein_cpp(
 
 \item{q}{Target distribution (m), must sum to 1}
 
-\item{alpha}{Trade-off parameter in \link{0, 1} (default: 0.5)
+\item{alpha}{Trade-off parameter between 0 and 1 (default: 0.5)
 \itemize{
 \item alpha = 0: pure Wasserstein (only feature cost)
 \item alpha = 1: pure GW (only structural cost)

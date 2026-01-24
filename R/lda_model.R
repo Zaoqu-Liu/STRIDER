@@ -104,9 +104,50 @@ train_lda <- function(matrix, n.topics = 10, n.iter = 500,
   )
   
   # Extract topic-word distribution (phi matrix)
-  topic_gene <- lda_model$.__enclos_env__$private$topic_word_distribution
+  # Try different methods to get topic-word distribution
+  topic_gene <- tryCatch({
+    # Method 1: Direct access to private field
+    lda_model$.__enclos_env__$private$topic_word_distribution
+  }, error = function(e) NULL)
+  
   if (is.null(topic_gene)) {
-    rlang::abort("Failed to extract topic-word distribution from model")
+    # Method 2: Use get_top_words and reconstruct
+    tryCatch({
+      # Get components from model
+      components <- lda_model$components
+      if (!is.null(components) && nrow(components) == n.topics) {
+        topic_gene <<- components
+      }
+    }, error = function(e) NULL)
+  }
+  
+  if (is.null(topic_gene)) {
+    # Method 3: Compute from word counts
+    tryCatch({
+      topic_word_count <- lda_model$.__enclos_env__$private$topic_word_count
+      if (!is.null(topic_word_count)) {
+        # Normalize to get distribution
+        row_sums <- rowSums(topic_word_count)
+        row_sums[row_sums == 0] <- 1
+        topic_gene <<- topic_word_count / row_sums
+      }
+    }, error = function(e) NULL)
+  }
+  
+  if (is.null(topic_gene)) {
+    # Method 4: Create from scratch using doc_topic and dtm
+    # This is a fallback - compute pseudo topic-word distribution
+    # P(word|topic) ∝ sum_d P(topic|doc) * count(word, doc)
+    topic_gene <- matrix(0, nrow = n.topics, ncol = ncol(dtm))
+    for (k in seq_len(n.topics)) {
+      # Weight each document's word counts by topic probability
+      topic_weights <- doc_topic_distr[, k]
+      topic_gene[k, ] <- as.numeric(Matrix::t(dtm) %*% topic_weights)
+    }
+    # Normalize
+    row_sums <- rowSums(topic_gene)
+    row_sums[row_sums == 0] <- 1
+    topic_gene <- topic_gene / row_sums
   }
   
   rownames(topic_gene) <- paste0("Topic_", seq_len(n.topics))

@@ -21,6 +21,6 @@ Find the optimal rotation matrix R to align X to Y
 using Procrustes analysis (SVD of cross-covariance).
 }
 \details{
-Minimizes sum_i w_i * ||X\link{i} * R - Y\link{i}||^2
-Solution: R = U * V^T where H = Y^T * W * X = U * S * V^T
+Minimizes weighted sum of squared alignment errors.
+Solution uses SVD: R = U * V' where H = Y' * W * X = U * S * V'
 }

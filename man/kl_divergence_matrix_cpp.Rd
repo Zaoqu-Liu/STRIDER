@@ -12,7 +12,7 @@ kl_divergence_matrix_cpp(P, Q)
 \item{Q}{Second matrix (m x k), rows are distributions}
 }
 \value{
-KL divergence matrix (n x m) where KL\link{i,j} = KL(P\link{i,} || Q\link{j,})
+KL divergence matrix (n x m) where entry at row i, col j is KL(P_i || Q_j)
 }
 \description{
 Compute pairwise KL divergence between probability distributions

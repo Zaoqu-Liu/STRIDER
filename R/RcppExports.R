@@ -82,7 +82,7 @@ gw_cpp <- function(C1, C2, p, q, reg = 0.1, max_iter = 100L, tol = 1e-7) {
 #' @param C2 Target structural distance matrix (m x m)
 #' @param p Source distribution (n), must sum to 1
 #' @param q Target distribution (m), must sum to 1
-#' @param alpha Trade-off parameter in [0, 1] (default: 0.5)
+#' @param alpha Trade-off parameter between 0 and 1 (default: 0.5)
 #'   \itemize{
 #'     \item alpha = 0: pure Wasserstein (only feature cost)
 #'     \item alpha = 1: pure GW (only structural cost)
@@ -119,7 +119,7 @@ fused_gromov_wasserstein_cpp <- function(M, C1, C2, p, q, alpha = 0.5, reg = 0.1
 #' @param P First matrix (n x k), rows are distributions
 #' @param Q Second matrix (m x k), rows are distributions
 #'
-#' @return KL divergence matrix (n x m) where KL[i,j] = KL(P[i,] || Q[j,])
+#' @return KL divergence matrix (n x m) where entry at row i, col j is KL(P_i || Q_j)
 #'
 #' @details
 #' KL(p||q) = sum_k p_k * log(p_k / q_k)
@@ -155,8 +155,8 @@ euclidean_distance_cpp <- function(X, Y_nullable = NULL) {
 #' @return Rotation matrix R (d x d) such that X * R aligns with Y
 #'
 #' @details
-#' Minimizes sum_i w_i * ||X[i] * R - Y[i]||^2
-#' Solution: R = U * V^T where H = Y^T * W * X = U * S * V^T
+#' Minimizes weighted sum of squared alignment errors.
+#' Solution uses SVD: R = U * V' where H = Y' * W * X = U * S * V'
 #'
 #' @export
 compute_rotation_svd_cpp <- function(X, Y, weights) {

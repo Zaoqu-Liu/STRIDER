@@ -1,6 +1,17 @@
 #' @useDynLib STRIDER, .registration = TRUE
 #' @importFrom Rcpp sourceCpp
+#' @importFrom utils head
 NULL
+
+# Suppress R CMD check notes for NSE variables used in ggplot2 and data.table
+utils::globalVariables(c(
+  # ggplot2 aesthetics
+  "x", "y", "x_aligned", "y_aligned", 
+  "celltype", "cluster", "fraction", "topic", "value",
+  "spot", "n_topics", "accuracy", "method", "coherence", "nmi",
+  # data.table operators
+  ":="
+))
 
 .onLoad <- function(libname, pkgname) {
   # Set default options

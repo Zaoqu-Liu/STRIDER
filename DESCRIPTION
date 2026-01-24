@@ -38,6 +38,7 @@ Suggests:
     text2vec (>= 0.6.0),
     FNN,
     scatterpie,
+    scales,
     hdf5r,
     rhdf5,
     SeuratObject,
@@ -53,7 +54,7 @@ LinkingTo:
     Rcpp,
     RcppArmadillo
 NeedsCompilation: yes
-SystemRequirements: C++11, GNU make
+SystemRequirements: GNU make
 VignetteBuilder: knitr
 Config/testthat/edition: 3
 Roxygen: list(markdown = TRUE)
