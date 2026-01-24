@@ -15,8 +15,10 @@ NULL
 #' @param coords.list List of spatial coordinate data frames
 #' @param sample.ids Sample identifiers (default: S1, S2, ...)
 #' @param alpha Trade-off parameter between feature and spatial similarity (default: 0.5)
-#'   - 0: pure OT (only topic similarity)
-#'   - 1: pure GW (only spatial structure)
+#'   \itemize{
+#'     \item 0: pure OT (only topic similarity)
+#'     \item 1: pure GW (only spatial structure)
+#'   }
 #' @param reg Sinkhorn regularization parameter (default: 0.1)
 #' @param max.iter Maximum iterations for FGW (default: 100)
 #' @param seed Random seed
@@ -24,10 +26,22 @@ NULL
 #' @return A list containing:
 #'   \itemize{
 #'     \item{aligned_coords}{Data frame of aligned coordinates for all samples}
-#'     \item{transport_plans}{List of optimal transport plans between consecutive samples}
+#'     \item{transport_plans}{List of optimal transport plans between samples}
 #'     \item{deconv}{Combined deconvolution results}
 #'     \item{rotation_matrices}{List of rotation matrices}
 #'   }
+#'
+#' @details
+#' The integration is performed sequentially, aligning each sample to the
+#' previous one. The FGW distance balances:
+#' \itemize{
+#'   \item Feature similarity: KL divergence between topic distributions
+#'   \item Structural similarity: Gromov-Wasserstein distance on spatial structure
+#' }
+#'
+#' @references
+#' Vayer, T., et al. (2020). Fused Gromov-Wasserstein distance for structured
+#' objects. Algorithms.
 #'
 #' @export
 #'
@@ -52,24 +66,23 @@ integrate_samples <- function(deconv.list, topic.list, coords.list,
     rlang::abort("At least 2 samples are required for integration")
   }
   
+  # Validate inputs
+  if (length(topic.list) != n_samples || length(coords.list) != n_samples) {
+    rlang::abort("All input lists must have the same length")
+  }
+  
   # Generate sample IDs if not provided
   if (is.null(sample.ids)) {
     sample.ids <- paste0("S", seq_len(n_samples))
   }
   
-  vmessage("Number of samples: ", n_samples)
-  vmessage("Sample IDs: ", paste(sample.ids, collapse = ", "))
-  vmessage("Alpha (structure vs feature): ", alpha)
+  vmessage("Samples: ", n_samples)
+  vmessage("Alpha: ", alpha, " (0=feature, 1=structure)")
   
   # ===== Process first sample =====
   vmessage("\nProcessing sample 1: ", sample.ids[1])
   
-  # Get data for first sample
-  s1_deconv <- deconv.list[[1]]
-  s1_topic <- topic.list[[1]]
-  s1_coords <- coords.list[[1]]
-  
-  # Center first sample
+  s1_coords <- as.data.frame(coords.list[[1]])
   s1_weights <- rep(1/nrow(s1_coords), nrow(s1_coords))
   s1_centered <- center_coords(s1_coords, s1_weights)
   
@@ -87,25 +100,19 @@ integrate_samples <- function(deconv.list, topic.list, coords.list,
   
   transport_plans <- list()
   rotation_matrices <- list()
-  
-  # Cumulative rotation matrix
   R_cumulative <- diag(2)
   
   # ===== Align subsequent samples =====
   for (i in 2:n_samples) {
     vmessage("\nAligning sample ", i, ": ", sample.ids[i], " to ", sample.ids[i-1])
     
-    # Get data for current sample
-    s2_deconv <- deconv.list[[i]]
-    s2_topic <- topic.list[[i]]
-    s2_coords <- coords.list[[i]]
-    
-    # Get data for previous sample
-    s1_deconv <- deconv.list[[i-1]]
+    # Get data for current and previous samples
     s1_topic <- topic.list[[i-1]]
-    s1_coords <- coords.list[[i-1]]
+    s1_coords <- as.data.frame(coords.list[[i-1]])
+    s2_topic <- topic.list[[i]]
+    s2_coords <- as.data.frame(coords.list[[i]])
     
-    # Align samples
+    # Align samples using FGW
     alignment <- align_samples(
       topic1 = s1_topic,
       topic2 = s2_topic,
@@ -119,7 +126,7 @@ integrate_samples <- function(deconv.list, topic.list, coords.list,
     # Update cumulative rotation
     R_cumulative <- R_cumulative %*% alignment$rotation
     
-    # Apply cumulative rotation to center current sample
+    # Apply cumulative rotation
     s2_weights <- rep(1/nrow(s2_coords), nrow(s2_coords))
     s2_centered <- center_coords(s2_coords, s2_weights)
     s2_aligned <- as.matrix(s2_centered) %*% t(R_cumulative)
@@ -139,7 +146,7 @@ integrate_samples <- function(deconv.list, topic.list, coords.list,
     all_coords <- rbind(all_coords, sample_coords)
     
     # Store transport plan and rotation
-    transport_plans[[paste0(sample.ids[i-1], "_", sample.ids[i])]] <- alignment$transport
+    transport_plans[[paste0(sample.ids[i-1], "_to_", sample.ids[i])]] <- alignment$transport
     rotation_matrices[[sample.ids[i]]] <- alignment$rotation
     
     vmessage("  FGW distance: ", round(alignment$fgw_dist, 4))
@@ -157,12 +164,15 @@ integrate_samples <- function(deconv.list, topic.list, coords.list,
   vmessage("\n=== Integration Complete ===")
   vmessage("Total spots: ", nrow(all_coords))
   
-  list(
-    aligned_coords = all_coords,
-    transport_plans = transport_plans,
-    rotation_matrices = rotation_matrices,
-    deconv = combined_deconv,
-    sample_ids = sample.ids
+  structure(
+    list(
+      aligned_coords = all_coords,
+      transport_plans = transport_plans,
+      rotation_matrices = rotation_matrices,
+      deconv = combined_deconv,
+      sample_ids = sample.ids
+    ),
+    class = "strider_integration"
   )
 }
 
@@ -179,7 +189,13 @@ integrate_samples <- function(deconv.list, topic.list, coords.list,
 #' @param reg Regularization parameter (default: 0.1)
 #' @param max.iter Maximum iterations (default: 100)
 #'
-#' @return A list containing transport plan, rotation matrix, and FGW distance
+#' @return A list containing:
+#'   \itemize{
+#'     \item{transport}{Optimal transport plan matrix}
+#'     \item{rotation}{Rotation matrix for alignment}
+#'     \item{fgw_dist}{FGW distance value}
+#'   }
+#'
 #' @export
 #'
 #' @examples
@@ -196,18 +212,22 @@ align_samples <- function(topic1, topic2, coords1, coords2,
   n1 <- nrow(topic1_t)
   n2 <- nrow(topic2_t)
   
-  # Uniform weights
+  # Uniform distribution (assumes equal weight per spot)
   p <- rep(1/n1, n1)
   q <- rep(1/n2, n2)
   
-  # Compute KL divergence matrix for topic similarity
+  # Feature cost: KL divergence between topic distributions
   M <- compute_kl_divergence(topic1_t, topic2_t)
   
-  # Compute spatial distance matrices
+  # Structure cost: spatial distance matrices
   C1 <- compute_distance_matrix(coords1)
   C2 <- compute_distance_matrix(coords2)
   
-  # Run FGW
+  # Normalize distance matrices to [0, 1]
+  C1 <- C1 / max(C1)
+  C2 <- C2 / max(C2)
+  
+  # Run FGW optimization
   fgw_result <- fused_gromov_wasserstein_cpp(
     M = M,
     C1 = C1,
@@ -220,7 +240,7 @@ align_samples <- function(topic1, topic2, coords1, coords2,
     tol = 1e-7
   )
   
-  # Compute optimal rotation
+  # Compute optimal rotation from transport plan
   rotation <- compute_rotation(coords1, coords2, fgw_result$T, p, q)
   
   list(
@@ -234,11 +254,11 @@ align_samples <- function(topic1, topic2, coords1, coords2,
 #'
 #' @description Center coordinates by weighted mean.
 #'
-#' @param coords Coordinate data frame or matrix
-#' @param weights Point weights
+#' @param coords Coordinate data frame or matrix (n x 2)
+#' @param weights Point weights (default: uniform)
 #'
-#' @return Centered coordinates
-#' @keywords internal
+#' @return Centered coordinates as data frame
+#' @export
 center_coords <- function(coords, weights = NULL) {
   coord_mat <- as.matrix(coords[, 1:2])
   
@@ -246,7 +266,7 @@ center_coords <- function(coords, weights = NULL) {
     weights <- rep(1/nrow(coord_mat), nrow(coord_mat))
   }
   
-  # Use C++ implementation
+  # Use C++ implementation for efficiency
   centered <- center_points_cpp(coord_mat, weights)
   
   colnames(centered) <- c("x", "y")
@@ -257,26 +277,25 @@ center_coords <- function(coords, weights = NULL) {
 
 #' Compute KL Divergence Matrix
 #'
-#' @description Compute pairwise KL divergence between topic distributions.
+#' @description Compute pairwise KL divergence between probability distributions.
 #'
-#' @param P Topic distribution matrix 1 (spots x topics)
-#' @param Q Topic distribution matrix 2 (spots x topics)
+#' @param P First matrix (n x k), rows are distributions
+#' @param Q Second matrix (m x k), rows are distributions
 #'
-#' @return KL divergence matrix (n1 x n2)
-#' @keywords internal
+#' @return KL divergence matrix (n x m)
+#' @export
 compute_kl_divergence <- function(P, Q) {
-  # Use C++ implementation
   kl_divergence_matrix_cpp(as.matrix(P), as.matrix(Q))
 }
 
 #' Compute Spatial Distance Matrix
 #'
-#' @description Compute pairwise Euclidean distance matrix.
+#' @description Compute pairwise Euclidean distance matrix from coordinates.
 #'
 #' @param coords Coordinate data frame or matrix
 #'
 #' @return Distance matrix
-#' @keywords internal
+#' @export
 compute_distance_matrix <- function(coords) {
   coord_mat <- as.matrix(coords[, 1:2])
   euclidean_distance_cpp(coord_mat, NULL)
@@ -284,7 +303,8 @@ compute_distance_matrix <- function(coords) {
 
 #' Compute Rotation Matrix
 #'
-#' @description Compute optimal rotation matrix using SVD.
+#' @description Compute optimal rotation matrix to align two point sets
+#'   using the optimal transport plan.
 #'
 #' @param coords1 Coordinates of sample 1
 #' @param coords2 Coordinates of sample 2
@@ -303,17 +323,14 @@ compute_rotation <- function(coords1, coords2, transport, p, q) {
   c1_centered <- center_points_cpp(c1, p)
   c2_centered <- center_points_cpp(c2, q)
   
-  # Compute optimal rotation
-  # Object matrix: X_2^T * Pi^T * X_1
-  obj_mat <- t(c2_centered) %*% t(transport) %*% c1_centered
+  # Compute cross-covariance: X2' * T' * X1
+  H <- t(c2_centered) %*% t(transport) %*% c1_centered
   
-  # SVD
-  svd_result <- svd(obj_mat)
-  
-  # Rotation matrix
+  # SVD for optimal rotation
+  svd_result <- svd(H)
   R <- svd_result$u %*% t(svd_result$v)
   
-  # Ensure proper rotation (det = 1)
+  # Ensure proper rotation (det = 1, not reflection)
   if (det(R) < 0) {
     svd_result$v[, 2] <- -svd_result$v[, 2]
     R <- svd_result$u %*% t(svd_result$v)
@@ -324,52 +341,37 @@ compute_rotation <- function(coords1, coords2, transport, p, q) {
 
 #' Plot Integration Results
 #'
-#' @description Visualize integrated samples in 3D or 2D.
+#' @description Visualize integrated samples.
 #'
 #' @param integration_result Result from integrate_samples()
-#' @param deconv Deconvolution results for pie chart coloring
-#' @param plot.3d Create 3D plot (default: FALSE)
+#' @param color.by Color spots by: "sample", "celltype", or NULL
 #' @param pt.size Point size (default: 2)
-#' @param sample.spacing Spacing between samples in 3D (default: 1)
+#' @param deconv Deconvolution results for cell type coloring
 #'
 #' @return A ggplot object
 #' @export
-plot_integration <- function(integration_result, deconv = NULL, 
-                             plot.3d = FALSE, pt.size = 2,
-                             sample.spacing = 1) {
+plot_integration <- function(integration_result, color.by = "sample",
+                             pt.size = 2, deconv = NULL) {
   
   coords <- integration_result$aligned_coords
   sample_ids <- unique(coords$sample)
   
-  if (plot.3d) {
-    rlang::warn("3D plotting requires additional setup. Returning 2D faceted plot.")
-    plot.3d <- FALSE
-  }
-  
-  # Create 2D faceted plot
-  if (!is.null(deconv)) {
+  if (color.by == "celltype" && !is.null(deconv)) {
     # Color by dominant cell type
     aligned_spots <- rownames(coords)
     common_spots <- intersect(aligned_spots, rownames(deconv))
     
     deconv_subset <- deconv[common_spots, , drop = FALSE]
     dominant_ct <- colnames(deconv_subset)[apply(deconv_subset, 1, which.max)]
-    coords$celltype <- dominant_ct[match(rownames(coords), common_spots)]
+    coords$celltype <- NA
+    coords$celltype[match(common_spots, rownames(coords))] <- dominant_ct
     
-    colors <- get_extended_colors(length(unique(dominant_ct)))
+    colors <- get_extended_colors(length(unique(stats::na.omit(coords$celltype))))
     
     p <- ggplot2::ggplot(coords, ggplot2::aes(x = x_aligned, y = y_aligned, color = celltype)) +
       ggplot2::geom_point(size = pt.size) +
-      ggplot2::scale_color_manual(values = colors) +
-      ggplot2::facet_wrap(~ sample, scales = "free") +
-      ggplot2::coord_equal() +
-      ggplot2::theme_minimal() +
-      ggplot2::labs(
-        title = "Integrated Samples",
-        x = "Aligned X",
-        y = "Aligned Y",
-        color = "Cell Type"
-      )
+      ggplot2::scale_color_manual(values = colors, na.value = "grey80") +
+      ggplot2::labs(color = "Cell Type")
   } else {
     # Color by sample
     colors <- get_extended_colors(length(sample_ids))
@@ -377,17 +379,32 @@ plot_integration <- function(integration_result, deconv = NULL,
     p <- ggplot2::ggplot(coords, ggplot2::aes(x = x_aligned, y = y_aligned, color = sample)) +
       ggplot2::geom_point(size = pt.size) +
       ggplot2::scale_color_manual(values = colors) +
-      ggplot2::coord_equal() +
-      ggplot2::theme_minimal() +
-      ggplot2::labs(
-        title = "Integrated Samples",
-        x = "Aligned X",
-        y = "Aligned Y",
-        color = "Sample"
-      )
+      ggplot2::labs(color = "Sample")
   }
   
+  p <- p +
+    ggplot2::coord_equal() +
+    ggplot2::theme_minimal() +
+    ggplot2::labs(
+      title = "Integrated Samples",
+      x = "Aligned X",
+      y = "Aligned Y"
+    )
+  
   p
+}
+
+#' Print Method for Integration Result
+#' @param x A strider_integration object
+#' @param ... Additional arguments (unused)
+#' @export
+print.strider_integration <- function(x, ...) {
+  cat("STRIDER Integration Result\n")
+  cat("==========================\n")
+  cat("Samples:", paste(x$sample_ids, collapse = ", "), "\n")
+  cat("Total spots:", nrow(x$aligned_coords), "\n")
+  cat("Alignments:", length(x$transport_plans), "\n")
+  invisible(x)
 }
 
 #' Calculate Integration Quality Metrics
@@ -395,11 +412,10 @@ plot_integration <- function(integration_result, deconv = NULL,
 #' @description Calculate metrics to assess integration quality.
 #'
 #' @param integration_result Result from integrate_samples()
-#' @param topic.list List of topic distributions
 #'
 #' @return Data frame with quality metrics
 #' @export
-integration_quality <- function(integration_result, topic.list) {
+integration_quality <- function(integration_result) {
   
   transport_plans <- integration_result$transport_plans
   
@@ -414,10 +430,14 @@ integration_quality <- function(integration_result, topic.list) {
     # Sparsity (fraction of near-zero entries)
     sparsity <- mean(T_mat < 1e-6)
     
+    # Maximum probability (degree of certainty)
+    max_prob <- max(T_mat)
+    
     data.frame(
       pair = name,
       entropy = entropy,
       sparsity = sparsity,
+      max_prob = max_prob,
       stringsAsFactors = FALSE
     )
   })

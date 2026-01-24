@@ -7,23 +7,36 @@ NULL
 #'
 #' @description Train a Latent Dirichlet Allocation (LDA) topic model on 
 #'   single-cell gene expression data. The model treats cells as documents
-#'   and genes as words.
+#'   and genes as words, following the methodology described in STRIDE.
 #'
 #' @param matrix Normalized count matrix (genes x cells)
 #' @param n.topics Number of topics (default: 10)
 #' @param n.iter Number of iterations (default: 500)
 #' @param convergence.tol Convergence tolerance (default: 1e-4)
+#' @param alpha Dirichlet prior for document-topic distribution. 
+#'   Default is 50/n.topics as in original STRIDE.
+#' @param beta Dirichlet prior for topic-word distribution (default: 0.01)
 #' @param seed Random seed for reproducibility
 #' @param verbose Print progress messages (default: TRUE)
 #'
 #' @return An LDA model object with components:
 #'   \itemize{
-#'     \item{topic_gene}{Topic-gene distribution matrix}
-#'     \item{doc_topic}{Document(cell)-topic distribution matrix}
+#'     \item{topic_gene}{Topic-gene distribution matrix (phi)}
+#'     \item{topic_cell}{Document-topic distribution matrix (theta)}
 #'     \item{vocab}{Gene vocabulary}
 #'     \item{n_topics}{Number of topics}
-#'     \item{coherence}{Model coherence scores}
 #'   }
+#'
+#' @details
+#' The LDA model is trained using Variational Bayes inference via the text2vec
+
+#' package. The default hyperparameters (alpha = 50/K, beta = 0.01) follow the
+#' original STRIDE implementation for optimal performance on single-cell data.
+#'
+#' @references
+#' Sun, D., et al. (2022). STRIDE: accurately decomposing and integrating
+#' spatial transcriptomics using single-cell RNA sequencing.
+#' Nucleic Acids Research.
 #'
 #' @export
 #'
@@ -32,16 +45,22 @@ NULL
 #' model <- train_lda(norm_mat, n.topics = 10)
 #' }
 train_lda <- function(matrix, n.topics = 10, n.iter = 500,
-                      convergence.tol = 1e-4, seed = NULL, verbose = TRUE) {
+                      convergence.tol = 1e-4, alpha = NULL, beta = 0.01,
+                      seed = NULL, verbose = TRUE) {
   
   if (verbose) vmessage("Training LDA model with ", n.topics, " topics...")
   
-  # Set seed
+  # Set seed for reproducibility
   if (!is.null(seed)) set.seed(seed)
   
   # Check for text2vec package
   if (!requireNamespace("text2vec", quietly = TRUE)) {
     rlang::abort("Package 'text2vec' is required. Install with: install.packages('text2vec')")
+  }
+  
+  # Set default alpha following STRIDE
+  if (is.null(alpha)) {
+    alpha <- 50 / n.topics
   }
   
   # Prepare data - transpose so cells are rows (documents)
@@ -51,20 +70,28 @@ train_lda <- function(matrix, n.topics = 10, n.iter = 500,
     dtm <- Matrix::Matrix(t(matrix), sparse = TRUE)
   }
   
-  # Ensure non-negative integers (scale and round)
+  # Ensure proper format
+
   dtm <- methods::as(dtm, "dgCMatrix")
+  
+  # Handle negative values (should not occur in count data)
   if (any(dtm@x < 0)) {
+    rlang::warn("Negative values detected and set to zero")
     dtm@x[dtm@x < 0] <- 0
   }
   
   # Store vocabulary (genes)
   vocab <- colnames(dtm)
+  if (is.null(vocab)) {
+    vocab <- paste0("Gene_", seq_len(ncol(dtm)))
+    colnames(dtm) <- vocab
+  }
   
-  # Create text2vec LDA model
+  # Create text2vec LDA model with STRIDE hyperparameters
   lda_model <- text2vec::LDA$new(
     n_topics = n.topics,
-    doc_topic_prior = 50 / n.topics,  # alpha
-    topic_word_prior = 0.01           # beta
+    doc_topic_prior = alpha,
+    topic_word_prior = beta
   )
   
   # Fit the model
@@ -76,36 +103,31 @@ train_lda <- function(matrix, n.topics = 10, n.iter = 500,
     progressbar = verbose
   )
   
-  # Get topic-word distribution
-  topic_word_distr <- lda_model$get_top_words(n = length(vocab), lambda = 1)
+  # Extract topic-word distribution (phi matrix)
+  topic_gene <- lda_model$.__enclos_env__$private$topic_word_distribution
+  if (is.null(topic_gene)) {
+    rlang::abort("Failed to extract topic-word distribution from model")
+  }
   
-  # Convert to proper matrix format (topics x genes)
-  topic_gene <- matrix(0, nrow = n.topics, ncol = length(vocab))
   rownames(topic_gene) <- paste0("Topic_", seq_len(n.topics))
   colnames(topic_gene) <- vocab
   
-  # Fill topic-gene matrix from model components
-  tw <- lda_model$.__enclos_env__$private$topic_word_distribution
-  if (!is.null(tw)) {
-    topic_gene <- tw
-    rownames(topic_gene) <- paste0("Topic_", seq_len(n.topics))
-    colnames(topic_gene) <- vocab
-  }
+  # Transpose doc_topic to get topic_cell (topics x cells)
+  topic_cell <- t(doc_topic_distr)
+  rownames(topic_cell) <- paste0("Topic_", seq_len(n.topics))
+  colnames(topic_cell) <- rownames(dtm)
   
-  # Transpose doc_topic to get topic_doc (topics x cells)
-  topic_doc <- t(doc_topic_distr)
-  rownames(topic_doc) <- paste0("Topic_", seq_len(n.topics))
-  colnames(topic_doc) <- rownames(dtm)
-  
-  if (verbose) vmessage("  LDA model training complete")
+  if (verbose) vmessage("  LDA training complete")
   
   structure(
     list(
       topic_gene = topic_gene,
-      topic_cell = topic_doc,
+      topic_cell = topic_cell,
       vocab = vocab,
       n_topics = n.topics,
       n_iter = n.iter,
+      alpha = alpha,
+      beta = beta,
       model = lda_model
     ),
     class = "strider_lda"
@@ -115,13 +137,18 @@ train_lda <- function(matrix, n.topics = 10, n.iter = 500,
 #' Apply LDA Model to New Data
 #'
 #' @description Apply a trained LDA model to transform new data (e.g., spatial spots)
-#'   into topic space.
+#'   into topic space using variational inference.
 #'
 #' @param model Trained LDA model from train_lda()
 #' @param newdata Matrix to transform (genes x cells/spots)
 #' @param n.iter Number of inference iterations (default: 100)
 #'
 #' @return Topic distribution matrix (topics x cells/spots)
+#'
+#' @details
+#' This function performs inference on new documents using the trained topic-word
+#' distributions. Genes not present in the training vocabulary are ignored.
+#'
 #' @export
 #'
 #' @examples
@@ -136,18 +163,25 @@ transform_lda <- function(model, newdata, n.iter = 100) {
   
   vmessage("Transforming data with LDA model...")
   
-  # Get shared genes
+  # Get shared genes between model vocabulary and new data
   shared_genes <- intersect(model$vocab, rownames(newdata))
   if (length(shared_genes) == 0) {
     rlang::abort("No shared genes between model and new data")
   }
   
+  if (length(shared_genes) < length(model$vocab) * 0.5) {
+    rlang::warn(paste0(
+      "Only ", length(shared_genes), " of ", length(model$vocab),
+      " genes shared. Results may be suboptimal."
+    ))
+  }
+  
   vmessage("  Using ", length(shared_genes), " shared genes")
   
-  # Subset and reorder to match model vocabulary
+  # Subset new data to shared genes
   newdata_subset <- newdata[shared_genes, , drop = FALSE]
   
-  # Create full vocabulary matrix with zeros
+  # Create document-term matrix with full vocabulary
   full_dtm <- Matrix::Matrix(
     0, 
     nrow = ncol(newdata_subset), 
@@ -161,7 +195,7 @@ transform_lda <- function(model, newdata, n.iter = 100) {
   gene_idx <- match(shared_genes, model$vocab)
   full_dtm[, gene_idx] <- Matrix::t(newdata_subset)
   
-  # Transform using the model
+  # Transform using the trained model
   doc_topic_distr <- model$model$transform(
     full_dtm,
     n_iter = n.iter,
@@ -181,13 +215,19 @@ transform_lda <- function(model, newdata, n.iter = 100) {
 #' Calculate Topic-Celltype Association Matrix
 #'
 #' @description Calculate the association between topics and cell types
-#'   based on the topic distribution of cells with known cell types.
+#'   by aggregating topic distributions across cells of each type.
 #'
 #' @param topic_cell Topic-cell matrix (topics x cells)
 #' @param celltypes Named vector of cell type annotations
-#' @param method Method for calculating association: "mean", "median", or "sum"
+#' @param method Aggregation method: "mean" (default), "median", or "sum"
 #'
 #' @return Topic-celltype matrix (topics x celltypes)
+#'
+#' @details
+#' This matrix represents P(topic|celltype), the probability of each topic
+#' given a cell type. It is computed by averaging topic distributions
+#' across all cells of each type.
+#'
 #' @export
 #'
 #' @examples
@@ -198,70 +238,84 @@ calculate_topic_celltype <- function(topic_cell, celltypes, method = "mean") {
   
   vmessage("Calculating topic-celltype associations...")
   
-  # Ensure alignment
+  # Ensure alignment between matrix and annotations
   common_cells <- intersect(colnames(topic_cell), names(celltypes))
-  topic_cell <- topic_cell[, common_cells]
+  if (length(common_cells) == 0) {
+    rlang::abort("No matching cells between topic_cell and celltypes")
+  }
+  
+  topic_cell <- topic_cell[, common_cells, drop = FALSE]
   celltypes <- celltypes[common_cells]
   
-  # Get unique cell types
+  # Get unique cell types (sorted for reproducibility)
   celltype_levels <- sort(unique(celltypes))
   n_topics <- nrow(topic_cell)
   n_celltypes <- length(celltype_levels)
   
-  # Calculate association matrix
+  # Initialize association matrix
   topic_celltype <- matrix(0, nrow = n_topics, ncol = n_celltypes)
   rownames(topic_celltype) <- rownames(topic_cell)
   colnames(topic_celltype) <- celltype_levels
   
+  # Aggregate topic distributions for each cell type
   for (ct in celltype_levels) {
     cells_ct <- names(celltypes)[celltypes == ct]
     ct_data <- topic_cell[, cells_ct, drop = FALSE]
     
-    if (method == "mean") {
-      topic_celltype[, ct] <- rowMeans(ct_data)
-    } else if (method == "median") {
-      topic_celltype[, ct] <- apply(ct_data, 1, stats::median)
-    } else if (method == "sum") {
-      topic_celltype[, ct] <- rowSums(ct_data)
-    }
+    topic_celltype[, ct] <- switch(
+      method,
+      "mean" = rowMeans(ct_data),
+      "median" = apply(ct_data, 1, stats::median),
+      "sum" = rowSums(ct_data),
+      rowMeans(ct_data)  # default to mean
+    )
   }
   
   topic_celltype
 }
 
-#' Calculate Celltype-Topic Bayes Matrix
+#' Calculate Bayesian Celltype-Topic Matrix
 #'
-#' @description Calculate Bayesian celltype-topic association using prior
-#'   probabilities of cell types.
+#' @description Calculate celltype-topic association using Bayes' theorem,
+#'   incorporating prior probabilities of cell types.
 #'
 #' @param topic_celltype Topic-celltype matrix (topics x celltypes)
 #' @param celltype_counts Named vector of cell counts per cell type
 #' @param total_cells Total number of cells
 #'
 #' @return Celltype-topic Bayes matrix (celltypes x topics)
+#'
+#' @details
+#' Applies Bayes' theorem: P(celltype|topic) = P(topic|celltype) * P(celltype) / P(topic)
+#' 
+#' This accounts for differences in cell type abundance in the reference data,
+#' preventing overrepresentation of abundant cell types in deconvolution.
+#'
 #' @export
 calculate_celltype_topic_bayes <- function(topic_celltype, celltype_counts, total_cells) {
   
   vmessage("Calculating Bayesian celltype-topic associations...")
   
-  # Prior probability of each cell type
-  celltype_prob <- celltype_counts / total_cells
+  # Prior probability of each cell type: P(celltype)
+  celltype_prob <- as.numeric(celltype_counts) / total_cells
+  names(celltype_prob) <- names(celltype_counts)
   
-  # Prior probability of each topic (sum across cell types, normalized)
-  topic_prob <- rowSums(topic_celltype)
-  topic_prob <- topic_prob / sum(topic_prob)
+  # Prior probability of each topic: P(topic) = sum_ct P(topic|ct) * P(ct)
+  topic_prob <- as.numeric(topic_celltype %*% celltype_prob)
+  
+  # Avoid division by zero
+  topic_prob[topic_prob == 0] <- 1e-10
   
   # Bayes: P(celltype|topic) = P(topic|celltype) * P(celltype) / P(topic)
-  # topic_celltype is P(topic|celltype)
-  
   celltype_topic_bayes <- t(topic_celltype)  # celltypes x topics
   
   for (i in seq_len(nrow(celltype_topic_bayes))) {
     ct <- rownames(celltype_topic_bayes)[i]
+    # P(topic|celltype) * P(celltype) / P(topic)
     celltype_topic_bayes[i, ] <- topic_celltype[, ct] * celltype_prob[ct] / topic_prob
   }
   
-  # Handle NaN/Inf
+  # Handle numerical issues
   celltype_topic_bayes[!is.finite(celltype_topic_bayes)] <- 0
   
   celltype_topic_bayes
@@ -270,46 +324,63 @@ calculate_celltype_topic_bayes <- function(topic_celltype, celltype_counts, tota
 #' Calculate LDA Coherence Score
 #'
 #' @description Calculate topic coherence scores to evaluate model quality.
-#'   Implements UMass coherence metric.
+#'   Implements the UMass coherence metric.
 #'
 #' @param model LDA model from train_lda()
 #' @param matrix Original count matrix used for training
-#' @param n.words Number of top words per topic for coherence calculation
+#' @param n.words Number of top words per topic (default: 10)
 #'
-#' @return Coherence score (higher is better, typically negative)
+#' @return A list containing:
+#'   \itemize{
+#'     \item{mean}{Mean coherence across all topics}
+#'     \item{per_topic}{Coherence score for each topic}
+#'   }
+#'
+#' @details
+#' UMass coherence measures how often top words co-occur in the corpus:
+#' C_UMass = sum_{j=2}^{M} sum_{i=1}^{j-1} log((D(w_i, w_j) + 1) / D(w_i))
+#' 
+#' Higher (less negative) values indicate more coherent topics.
+#'
+#' @references
+#' Mimno, D., et al. (2011). Optimizing semantic coherence in topic models.
+#' EMNLP.
+#'
 #' @export
 calculate_coherence <- function(model, matrix, n.words = 10) {
   
-  vmessage("Calculating topic coherence...")
+  vmessage("Calculating topic coherence (UMass)...")
   
-  # Get top words for each topic
   topic_gene <- model$topic_gene
+  n_topics <- nrow(topic_gene)
   
-  coherence_scores <- numeric(nrow(topic_gene))
+  coherence_scores <- numeric(n_topics)
   
-  for (k in seq_len(nrow(topic_gene))) {
+  for (k in seq_len(n_topics)) {
     # Get top genes for this topic
-    top_genes <- names(sort(topic_gene[k, ], decreasing = TRUE))[seq_len(n.words)]
-    top_genes <- top_genes[top_genes %in% rownames(matrix)]
+    gene_probs <- topic_gene[k, ]
+    top_genes <- names(sort(gene_probs, decreasing = TRUE))[seq_len(n.words)]
+    top_genes <- intersect(top_genes, rownames(matrix))
     
     if (length(top_genes) < 2) {
       coherence_scores[k] <- NA
       next
     }
     
-    # Calculate UMass coherence
-    # C = sum_{j=2}^M sum_{i=1}^{j-1} log((D(wi, wj) + 1) / D(wi))
-    # where D(wi, wj) = count of documents containing both words
-    # D(wi) = count of documents containing word wi
-    
-    # Binarize: present or not
+    # Binarize: gene expressed or not in each cell
     sub_mat <- matrix[top_genes, , drop = FALSE] > 0
     
+    # Calculate UMass coherence
     coherence <- 0
-    for (j in 2:length(top_genes)) {
+    m <- length(top_genes)
+    
+    for (j in 2:m) {
       for (i in 1:(j-1)) {
+        # D(w_i) = number of cells expressing gene i
         D_wi <- sum(sub_mat[i, ])
+        # D(w_i, w_j) = number of cells expressing both genes
         D_wiwj <- sum(sub_mat[i, ] & sub_mat[j, ])
+        
         if (D_wi > 0) {
           coherence <- coherence + log((D_wiwj + 1) / D_wi)
         }
@@ -319,10 +390,9 @@ calculate_coherence <- function(model, matrix, n.words = 10) {
     coherence_scores[k] <- coherence
   }
   
-  # Average coherence across topics
   mean_coherence <- mean(coherence_scores, na.rm = TRUE)
   
-  vmessage("  Mean coherence (UMass): ", round(mean_coherence, 3))
+  vmessage("  Mean coherence: ", round(mean_coherence, 3))
   
   list(
     mean = mean_coherence,
@@ -331,13 +401,16 @@ calculate_coherence <- function(model, matrix, n.words = 10) {
 }
 
 #' Print Method for LDA Model
+#' @param x A strider_lda object
+#' @param ... Additional arguments (unused)
 #' @export
 print.strider_lda <- function(x, ...) {
   cat("STRIDER LDA Model\n")
   cat("-----------------\n")
-  cat("Number of topics:", x$n_topics, "\n")
-  cat("Vocabulary size:", length(x$vocab), "\n")
-  cat("Number of documents:", ncol(x$topic_cell), "\n")
-  cat("Training iterations:", x$n_iter, "\n")
+  cat("Topics:", x$n_topics, "\n")
+  cat("Vocabulary:", length(x$vocab), "genes\n")
+  cat("Documents:", ncol(x$topic_cell), "cells\n")
+  cat("Iterations:", x$n_iter, "\n")
+  cat("Hyperparameters: alpha =", round(x$alpha, 3), ", beta =", x$beta, "\n")
   invisible(x)
 }

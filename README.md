@@ -1,29 +1,30 @@
 # STRIDER <img src="man/figures/logo.png" align="right" height="139" />
 
 <!-- badges: start -->
-[![R-CMD-check](https://github.com/Zaoqu-Liu/STRIDER/workflows/R-CMD-check/badge.svg)](https://github.com/Zaoqu-Liu/STRIDER/actions)
-[![CRAN status](https://www.r-pkg.org/badges/version/STRIDER)](https://CRAN.R-project.org/package=STRIDER)
-[![Lifecycle: stable](https://img.shields.io/badge/lifecycle-stable-brightgreen.svg)](https://lifecycle.r-lib.org/articles/stages.html#stable)
+[![R-CMD-check](https://github.com/Zaoqu-Liu/STRIDER/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/Zaoqu-Liu/STRIDER/actions/workflows/R-CMD-check.yaml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 <!-- badges: end -->
 
-**STRIDER** (**S**patial **TR**anscriptomics **I**ntegration and **DE**convolution in **R**) is a comprehensive R package for cell-type deconvolution of spatial transcriptomics data using topic modeling (LDA).
+**STRIDER** (**S**patial **T**ranscriptomics deconvolu**T**ion and integ**R**ation **I**n **D**eveloped **E**nvironment for **R**) is an R package for comprehensive analysis of spatial transcriptomics data, including cell type deconvolution, multi-sample integration, and spatial clustering.
 
-## 🌟 Features
+## Overview
 
-- **Cell-type Deconvolution**: Decompose cell-type proportions in spatial spots using single-cell reference
-- **Multi-sample Integration**: Align multiple samples using Fused Gromov-Wasserstein optimal transport
-- **Spatial Clustering**: Neighborhood-aware clustering based on cell-type composition
-- **Spot-to-Cell Mapping**: Identify most similar single cells for each spatial spot
-- **Publication-ready Visualization**: Beautiful scatter pie plots, heatmaps, and more
+STRIDER implements:
 
-## 📦 Installation
+- **Cell Type Deconvolution**: Topic modeling (LDA) based decomposition of spatial spots into cell type proportions
+- **Multi-Sample Integration**: Fused Gromov-Wasserstein (FGW) optimal transport for aligning multiple spatial samples
+- **Spatial Clustering**: Neighborhood-aware clustering of spatial domains
+- **Visualization**: Publication-ready scatter pie plots, heatmaps, and integration visualizations
 
-### From GitHub (recommended)
+## Installation
+
+### From GitHub
 
 ```r
 # Install devtools if needed
-if (!requireNamespace("devtools", quietly = TRUE))
+if (!requireNamespace("devtools", quietly = TRUE)) {
     install.packages("devtools")
+}
 
 # Install STRIDER
 devtools::install_github("Zaoqu-Liu/STRIDER")
@@ -31,184 +32,158 @@ devtools::install_github("Zaoqu-Liu/STRIDER")
 
 ### Dependencies
 
-STRIDER requires the following packages:
+STRIDER requires several packages. Install them with:
 
 ```r
-# Core dependencies
-install.packages(c("Matrix", "data.table", "ggplot2", "Rcpp", "RcppArmadillo"))
+# Required packages
+install.packages(c("Matrix", "data.table", "ggplot2", "viridis", "Rcpp"))
 
-# For visualization
-install.packages(c("scatterpie", "viridis", "patchwork"))
-
-# For LDA modeling
+# For LDA topic modeling
 install.packages("text2vec")
 
-# Optional: For reading HDF5 files
+# For spatial neighbor analysis
+install.packages("FNN")
+
+# For scatter pie plots
+install.packages("scatterpie")
+
+# For HDF5 file support (choose one)
 install.packages("hdf5r")
 # or
 BiocManager::install("rhdf5")
+
+# For Seurat integration
+install.packages("SeuratObject")
 ```
 
-## 🚀 Quick Start
+## Quick Start
 
-### Basic Usage
+### Basic Deconvolution
 
 ```r
 library(STRIDER)
 
-# Run STRIDER deconvolution
+# Run deconvolution pipeline
 result <- run_strider(
-  sc.data = "sc_count.h5",           # Single-cell count matrix
-  st.data = "st_count.h5",           # Spatial count matrix
-  sc.celltype = "celltype.txt",      # Cell type annotations
-  out.dir = "output",                 # Output directory
-  out.prefix = "my_sample"            # Output file prefix
+  sc.data = sc_matrix,       # Single-cell count matrix (genes x cells)
+  st.data = st_matrix,       # Spatial count matrix (genes x spots)
+  sc.celltype = celltypes,   # Named vector of cell type annotations
+  n.topics = NULL,           # Auto-select optimal topic number
+  out.dir = "strider_output"
 )
 
-# Visualize results
-plot_deconv(result, coords, plot.type = "scatterpie")
+# View results
+print(result)
+summary(result)
 ```
 
-### From Seurat Objects (V4 Compatible)
+### From Seurat Objects
 
 ```r
-library(STRIDER)
-library(Seurat)
-
-# Load Seurat objects
-seurat_sc <- readRDS("sc_seurat.rds")
-seurat_st <- readRDS("st_seurat.rds")
-
-# Run STRIDER
+# From Seurat objects (v4 or v5)
 result <- run_strider(
   sc.data = seurat_sc,
   st.data = seurat_st,
-  sc.celltype = "celltype"  # Column name in metadata
+  sc.celltype = "celltype"   # Column name in metadata
 )
 ```
 
-## 📖 Workflow
-
-### 1. Deconvolution
+### Visualization
 
 ```r
-# Full pipeline
-result <- run_strider(
-  sc.data = sc_matrix,
-  st.data = st_matrix,
-  sc.celltype = celltypes,
-  n.markers = 200,        # Markers per cell type
-  n.topics = 5:15,        # Topic range to test
-  method = "auto"         # Auto-select best method
-)
+# Scatter pie plot
+plot_deconv(result, coords, plot.type = "scatterpie")
 
-# Access results
-deconv_frac <- result$deconv       # Cell type fractions
-topic_dist <- result$topic_spot    # Topic distributions
+# Dominant cell type scatter plot
+plot_deconv(result, coords, plot.type = "scatter")
+
+# Cell type composition heatmap
+plot_deconv(result, coords, plot.type = "heatmap")
 ```
 
-### 2. Spatial Clustering
+### Spatial Clustering
 
 ```r
 # Neighborhood-aware clustering
 clusters <- spatial_cluster(
-  result, 
+  result,
   coords,
   n.clusters = 5,
-  weight = 0.5  # Balance between own vs neighbor composition
+  weight = 0.5    # Balance between spot and neighbor composition
 )
 
-# Visualize
-plot_cluster(clusters, pt.size = 4)
+# Visualize clusters
+plot_cluster(clusters)
+
+# Find enriched cell types per cluster
+markers <- find_cluster_markers(result, clusters)
 ```
 
-### 3. Multi-sample Integration
+### Multi-Sample Integration
 
 ```r
-# Integrate multiple samples using FGW optimal transport
+# Integrate multiple samples using FGW
 integrated <- integrate_samples(
   deconv.list = list(deconv1, deconv2, deconv3),
   topic.list = list(topic1, topic2, topic3),
   coords.list = list(coords1, coords2, coords3),
-  alpha = 0.5  # Balance structure vs features
+  alpha = 0.5    # Trade-off: 0=feature, 1=structure
 )
 
-# Visualize
+# Visualize integration
 plot_integration(integrated)
 ```
 
-### 4. Spot-to-Cell Mapping
+## Key Functions
 
-```r
-# Map spots to similar cells
-mapping <- map_spots_to_cells(
-  topic.spot = topic_spot,
-  topic.cell = topic_cell,
-  n.top = 10
-)
+| Function | Description |
+|----------|-------------|
+| `run_strider()` | Main deconvolution pipeline |
+| `train_lda()` | Train LDA topic model |
+| `deconvolve()` | Deconvolve spatial spots |
+| `spatial_cluster()` | Neighborhood-aware clustering |
+| `integrate_samples()` | Multi-sample integration |
+| `find_markers()` | Identify cell type markers |
+| `plot_deconv()` | Visualize deconvolution |
+| `plot_cluster()` | Visualize spatial clusters |
 
-# Transfer labels
-labels <- transfer_labels(mapping, celltypes)
-```
+## Input Formats
 
-## 📊 Visualization
+STRIDER supports multiple input formats:
 
-```r
-# Scatter pie plot
-plot_deconv_pie(result$deconv, coords, pt.size = 8)
+- **Matrices**: Dense or sparse gene x cell/spot matrices
+- **Seurat objects**: v4 and v5 compatible
+- **10X HDF5**: Cell Ranger output files
+- **Text files**: Tab-separated count matrices
 
-# Scatter plot (dominant cell type)
-plot_deconv_scatter(result$deconv, coords, pt.size = 2)
+## Performance
 
-# Heatmap
-plot_celltype_heatmap(result$deconv)
+The package is optimized for performance:
 
-# Model selection
-plot_model_selection(result$metrics)
-```
+- Sparse matrix operations throughout
+- C++ implementation of FGW optimal transport
+- Efficient data I/O via data.table
+- Optional parallel processing
 
-## ⚡ Performance
-
-STRIDER is optimized for performance:
-
-- **Vectorized operations** using Matrix package
-- **C++ backend** (RcppArmadillo) for Fused Gromov-Wasserstein
-- **Efficient sparse matrix** handling throughout
-- **Optional parallelization** via future package
-
-## 📚 Vignettes
-
-- [Getting Started](vignettes/getting_started.html)
-- [Multi-sample Integration](vignettes/integration.html)
-- [Working with Seurat](vignettes/seurat_workflow.html)
-
-## 🔬 Citation
+## Citation
 
 If you use STRIDER in your research, please cite:
 
 ```
-Liu Z, et al. (2024). STRIDER: Spatial Transcriptomics Integration and 
-Deconvolution in R. GitHub: https://github.com/Zaoqu-Liu/STRIDER
+Liu, Z. (2026). STRIDER: Spatial Transcriptomics Deconvolution and Integration in R.
+GitHub repository: https://github.com/Zaoqu-Liu/STRIDER
 ```
 
-Original Python implementation (STRIDE):
-```
-Sun D, et al. (2022). STRIDE: accurately decomposing and integrating 
-spatial transcriptomics using single-cell RNA sequencing. 
-Nucleic Acids Research. doi: 10.1093/nar/gkac150
-```
+## License
 
-## 📧 Contact
+MIT License
+
+## Contact
 
 - **Author**: Zaoqu Liu
 - **Email**: liuzaoqu@163.com
-- **GitHub**: [https://github.com/Zaoqu-Liu/STRIDER](https://github.com/Zaoqu-Liu/STRIDER)
+- **GitHub**: https://github.com/Zaoqu-Liu/STRIDER
 
-## 📄 License
+## Acknowledgments
 
-MIT License © 2024 Zaoqu Liu
-
-## 🙏 Acknowledgments
-
-This package is an R implementation of the original Python STRIDE tool by Dongqing Sun.
-Special thanks to the original authors for their excellent work.
+STRIDER is inspired by the STRIDE Python package (Sun et al., 2022). The Fused Gromov-Wasserstein implementation follows Vayer et al. (2020).

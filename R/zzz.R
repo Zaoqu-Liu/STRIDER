@@ -1,10 +1,5 @@
-#' @keywords internal
-"_PACKAGE"
-
-## usethis namespace: start
 #' @useDynLib STRIDER, .registration = TRUE
 #' @importFrom Rcpp sourceCpp
-## usethis namespace: end
 NULL
 
 .onLoad <- function(libname, pkgname) {
@@ -12,8 +7,7 @@ NULL
   op <- options()
   op.strider <- list(
     strider.verbose = TRUE,
-    strider.seed = 42,
-    strider.ncores = 1L
+    strider.seed = 42
   )
   toset <- !(names(op.strider) %in% names(op))
   if (any(toset)) options(op.strider[toset])
@@ -22,10 +16,15 @@ NULL
 }
 
 .onAttach <- function(libname, pkgname) {
+  version <- utils::packageVersion(pkgname)
   packageStartupMessage(
-    "STRIDER v", utils::packageVersion("STRIDER"), "\n",
-    "Spatial TRanscrIptomics DEconvolution in R\n",
+    "STRIDER version ", version, "\n",
+    "Spatial Transcriptomics Deconvolution and Integration in R\n",
     "Author: Zaoqu Liu (liuzaoqu@163.com)\n",
     "GitHub: https://github.com/Zaoqu-Liu/STRIDER"
   )
+}
+
+.onUnload <- function(libpath) {
+  library.dynam.unload("STRIDER", libpath)
 }

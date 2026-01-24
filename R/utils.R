@@ -1,15 +1,15 @@
 #' @title Utility Functions for STRIDER
-#' @description Internal utility functions for the STRIDER package
+#' @description Internal and exported utility functions for the STRIDER package
 #' @name utils
 #' @keywords internal
 NULL
 
-#' Default Color Palette for STRIDER
+#' Default Color Palette
 #'
 #' @description A carefully curated color palette for visualizing cell types
-#'   and clusters in spatial transcriptomics data.
+#'   and clusters. Designed to be colorblind-friendly and distinguishable.
 #'
-#' @return A character vector of hex color codes
+#' @return A character vector of 36 hex color codes
 #' @export
 #'
 #' @examples
@@ -26,13 +26,12 @@ get_default_colors <- function() {
   )
 }
 
-#' Extended Color Palette Generator
+#' Generate Color Palette
 #'
 #' @description Generate a color palette with a specified number of colors.
-#'   Uses default colors first, then extends with viridis if needed.
 #'
 #' @param n Number of colors needed
-#' @param palette Base palette to use ("default", "viridis", "spectral")
+#' @param palette Base palette: "default" or "viridis"
 #'
 #' @return A character vector of hex color codes
 #' @export
@@ -45,21 +44,15 @@ get_extended_colors <- function(n, palette = "default") {
     default_cols <- get_default_colors()
     if (n <= length(default_cols)) {
       return(default_cols[seq_len(n)])
-    } else {
-      # Extend with viridis
-      extra_n <- n - length(default_cols)
-      extra_cols <- viridis::viridis(extra_n)
-      return(c(default_cols, extra_cols))
     }
+    # Extend with viridis
+    extra_n <- n - length(default_cols)
+    extra_cols <- viridis::viridis(extra_n)
+    return(c(default_cols, extra_cols))
   } else if (palette == "viridis") {
     return(viridis::viridis(n))
-  } else if (palette == "spectral") {
-    return(grDevices::colorRampPalette(
-      RColorBrewer::brewer.pal(11, "Spectral")
-    )(n))
-  } else {
-    rlang::abort(paste0("Unknown palette: ", palette))
   }
+  rlang::abort(paste0("Unknown palette: ", palette))
 }
 
 #' Check if Object is Sparse Matrix
@@ -68,8 +61,7 @@ get_extended_colors <- function(n, palette = "default") {
 #' @return Logical
 #' @keywords internal
 is_sparse <- function(x) {
-  inherits(x, "sparseMatrix") || inherits(x, "dgCMatrix") || 
-    inherits(x, "dgRMatrix") || inherits(x, "dgTMatrix")
+  inherits(x, c("sparseMatrix", "dgCMatrix", "dgRMatrix", "dgTMatrix"))
 }
 
 #' Convert to Sparse Matrix
@@ -78,7 +70,6 @@ is_sparse <- function(x) {
 #' @return dgCMatrix
 #' @keywords internal
 as_sparse <- function(x) {
-
   if (is_sparse(x)) {
     return(methods::as(x, "dgCMatrix"))
   }
@@ -87,25 +78,19 @@ as_sparse <- function(x) {
 
 #' Safe Log Transformation
 #'
-#' @description Perform log transformation with a small offset to avoid log(0)
-#'
 #' @param x Numeric vector or matrix
-#' @param base Log base (default: natural log)
-#' @param pseudocount Pseudocount to add (default: 1)
-#'
+#' @param base Log base (default: e)
+#' @param pseudocount Pseudocount (default: 1)
 #' @return Log-transformed values
 #' @keywords internal
 safe_log <- function(x, base = exp(1), pseudocount = 1) {
   log(x + pseudocount, base = base)
 }
 
-#' Normalize to Sum to 1
-#'
-#' @description Normalize a vector or matrix rows to sum to 1
+#' Normalize Rows/Columns to Sum to 1
 #'
 #' @param x Numeric vector or matrix
 #' @param margin For matrices: 1 = rows, 2 = columns
-#'
 #' @return Normalized values
 #' @keywords internal
 normalize_to_one <- function(x, margin = 1) {
@@ -119,21 +104,21 @@ normalize_to_one <- function(x, margin = 1) {
     row_sums <- Matrix::rowSums(x)
     row_sums[row_sums == 0] <- 1
     return(x / row_sums)
-  } else {
-    col_sums <- Matrix::colSums(x)
-    col_sums[col_sums == 0] <- 1
-    return(Matrix::t(Matrix::t(x) / col_sums))
   }
+  
+  col_sums <- Matrix::colSums(x)
+  col_sums[col_sums == 0] <- 1
+  return(Matrix::t(Matrix::t(x) / col_sums))
 }
 
-#' Message with Timestamp
+#' Print Message with Timestamp
 #'
 #' @param ... Message components
-#' @param verbose Whether to print
+#' @param verbose Whether to print (default: from options)
 #' @keywords internal
 vmessage <- function(..., verbose = getOption("strider.verbose", TRUE)) {
   if (verbose) {
-    timestamp <- format(Sys.time(), "[%Y-%m-%d %H:%M:%S]")
+    timestamp <- format(Sys.time(), "[%H:%M:%S]")
     message(timestamp, " ", ...)
   }
 }
@@ -149,36 +134,21 @@ quantile_norm_factor <- function(x, q = 0.75) {
   round(qval / 1000, 0) * 1000
 }
 
-#' Fast Row/Column Operations on Sparse Matrices
+#' Scale Sparse Matrix by Column
 #'
-#' @name sparse_ops
+#' @param x Sparse matrix
+#' @param scale_factor Scale factor
+#' @return Scaled matrix
 #' @keywords internal
-NULL
-
-#' @rdname sparse_ops
 sparse_row_scale <- function(x, scale_factor) {
-  # Efficient row scaling for sparse matrices
   if (!is_sparse(x)) {
     x <- as_sparse(x)
   }
   
-  # Get dimensions
-  nr <- nrow(x)
-  nc <- ncol(x)
-  
-  # Column sums for normalization
   col_sums <- Matrix::colSums(x)
   col_sums[col_sums == 0] <- 1
   
-  # Scale each column
-  x_scaled <- x %*% Matrix::Diagonal(x = scale_factor / col_sums)
-  
-  return(x_scaled)
-}
-
-#' @rdname sparse_ops
-sparse_col_scale <- function(x, scale_factor) {
-  Matrix::t(sparse_row_scale(Matrix::t(x), scale_factor))
+  x %*% Matrix::Diagonal(x = scale_factor / col_sums)
 }
 
 #' Check Required Packages
@@ -192,19 +162,16 @@ check_packages <- function(pkgs, error = TRUE) {
   
   if (length(missing) > 0) {
     msg <- paste0(
-      "The following packages are required but not installed: ",
+      "Required packages not installed: ",
       paste(missing, collapse = ", "),
-      "\nPlease install them with: install.packages(c(",
+      "\nInstall with: install.packages(c(",
       paste0('"', missing, '"', collapse = ", "), "))"
     )
-    if (error) {
-      rlang::abort(msg)
-    } else {
-      rlang::warn(msg)
-      return(FALSE)
-    }
+    if (error) rlang::abort(msg)
+    rlang::warn(msg)
+    return(FALSE)
   }
-  return(TRUE)
+  TRUE
 }
 
 #' Validate Input Data
@@ -233,13 +200,9 @@ validate_input <- function(x, name, type = NULL, allow_null = FALSE) {
     )
     
     if (!type_check) {
-      rlang::abort(paste0(
-        "`", name, "` must be of type ", type, 
-        ", not ", class(x)[1]
-      ))
+      rlang::abort(paste0("`", name, "` must be ", type, ", not ", class(x)[1]))
     }
   }
-  
   invisible(NULL)
 }
 
@@ -254,32 +217,116 @@ set_seed <- function(seed = NULL) {
   set.seed(seed)
 }
 
-#' Create Progress Bar
-#'
-#' @param n Total iterations
-#' @param name Task name
-#' @return Progress bar object
-#' @keywords internal
-create_progress <- function(n, name = "Processing") {
-  if (requireNamespace("progressr", quietly = TRUE)) {
-    progressr::progressor(steps = n)
-  } else {
-    function(...) invisible(NULL)
-  }
-}
-
 #' Safe Division
-#'
-#' @description Perform division while handling zero denominators
 #'
 #' @param x Numerator
 #' @param y Denominator
-#' @param replace Value to use when y is zero (default: 0)
-#'
+#' @param replace Value when y is zero (default: 0)
 #' @return Result of division
 #' @keywords internal
 safe_divide <- function(x, y, replace = 0) {
   result <- x / y
   result[!is.finite(result)] <- replace
   result
+}
+
+#' Convert STRIDER Object to Seurat
+#'
+#' @description Add STRIDER deconvolution results to a Seurat object.
+#'
+#' @param strider STRIDER result object
+#' @param seurat Seurat object
+#' @param assay.name Name for new assay (default: "STRIDER")
+#'
+#' @return Seurat object with deconvolution results
+#' @export
+as_seurat <- function(strider, seurat, assay.name = "STRIDER") {
+  if (!inherits(strider, "STRIDER")) {
+    rlang::abort("strider must be a STRIDER object")
+  }
+  if (!inherits(seurat, "Seurat")) {
+    rlang::abort("seurat must be a Seurat object")
+  }
+  
+  # Match spots
+  common <- intersect(rownames(strider$deconv), colnames(seurat))
+  if (length(common) == 0) {
+    rlang::abort("No matching spots between STRIDER and Seurat objects")
+  }
+  
+  # Add to metadata
+  deconv_df <- as.data.frame(strider$deconv[common, , drop = FALSE])
+  for (ct in colnames(deconv_df)) {
+    seurat@meta.data[[paste0("strider_", ct)]] <- deconv_df[[ct]]
+  }
+  
+  seurat
+}
+
+#' Create STRIDER Object from Seurat
+#'
+#' @description Extract data from Seurat object for STRIDER analysis.
+#'
+#' @param seurat Seurat object
+#' @param celltype.col Column name in metadata containing cell types
+#' @param assay Assay to use (default: "RNA")
+#'
+#' @return List with matrix and celltypes
+#' @export
+from_seurat <- function(seurat, celltype.col, assay = "RNA") {
+  if (!inherits(seurat, "Seurat")) {
+    rlang::abort("seurat must be a Seurat object")
+  }
+  
+  # Extract counts
+  counts <- .extract_seurat_counts(seurat)
+  
+  # Extract celltypes
+  celltypes <- .extract_seurat_metadata(seurat, celltype.col)
+  
+  list(
+    matrix = counts,
+    celltypes = celltypes
+  )
+}
+
+# Re-export the internal function for as_seurat
+#' @keywords internal
+.extract_seurat_counts <- function(seurat_obj) {
+  counts <- NULL
+  
+  if (requireNamespace("SeuratObject", quietly = TRUE)) {
+    tryCatch({
+      counts <- SeuratObject::GetAssayData(seurat_obj, layer = "counts")
+    }, error = function(e) {
+      tryCatch({
+        counts <<- SeuratObject::GetAssayData(seurat_obj, slot = "counts")
+      }, error = function(e2) NULL)
+    })
+  }
+  
+  if (is.null(counts)) {
+    tryCatch({
+      counts <- seurat_obj@assays$RNA@counts
+    }, error = function(e) {
+      tryCatch({
+        counts <- seurat_obj@assays$Spatial@counts
+      }, error = function(e2) {
+        rlang::abort("Could not extract counts from Seurat object")
+      })
+    })
+  }
+  
+  as_sparse(counts)
+}
+
+#' @keywords internal
+.extract_seurat_metadata <- function(seurat_obj, column) {
+  if (!column %in% colnames(seurat_obj@meta.data)) {
+    rlang::abort(paste0("Column '", column, "' not found in Seurat metadata"))
+  }
+  
+  celltypes <- seurat_obj@meta.data[[column]]
+  names(celltypes) <- rownames(seurat_obj@meta.data)
+  celltypes
 }

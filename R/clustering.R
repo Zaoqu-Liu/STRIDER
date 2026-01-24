@@ -5,14 +5,20 @@ NULL
 
 #' Find Spatial Neighbors
 #'
-#' @description Find neighbors for each spot based on spatial coordinates.
+#' @description Find neighbors for each spot based on spatial coordinates
+#'   using k-nearest neighbors or distance threshold.
 #'
-#' @param coords Data frame with spatial coordinates (columns: x, y or spot, x, y)
+#' @param coords Data frame with spatial coordinates (columns: x, y)
 #' @param k Number of nearest neighbors (default: 6)
 #' @param radius Distance radius for neighbors (alternative to k)
 #' @param include.self Include the spot itself as a neighbor (default: FALSE)
 #'
 #' @return A list where each element contains indices of neighbors for each spot
+#'
+#' @details
+#' For Visium data, k=6 corresponds to the hexagonal grid structure.
+#' For other technologies, adjust k based on expected spatial relationships.
+#'
 #' @export
 #'
 #' @examples
@@ -36,7 +42,7 @@ find_neighbors <- function(coords, k = 6, radius = NULL, include.self = FALSE) {
   rownames(coord_matrix) <- rownames(coords)
   
   if (!is.null(radius)) {
-    # Radius-based neighbors using distance matrix
+    # Radius-based neighbors
     dist_mat <- as.matrix(stats::dist(coord_matrix, method = "euclidean"))
     
     neighbor_list <- lapply(seq_len(n_spots), function(i) {
@@ -47,12 +53,12 @@ find_neighbors <- function(coords, k = 6, radius = NULL, include.self = FALSE) {
       neighbors
     })
   } else {
-    # K-nearest neighbors using FNN
+    # K-nearest neighbors
     if (!requireNamespace("FNN", quietly = TRUE)) {
       rlang::abort("Package 'FNN' is required. Install with: install.packages('FNN')")
     }
     
-    # Add 1 to k if not including self (FNN includes the point itself)
+    # FNN includes the point itself, so adjust k
     k_search <- if (include.self) k else k + 1
     
     nn_result <- FNN::get.knn(coord_matrix, k = k_search)
@@ -68,8 +74,8 @@ find_neighbors <- function(coords, k = 6, radius = NULL, include.self = FALSE) {
   
   names(neighbor_list) <- rownames(coords)
   
-  vmessage("  Found neighbors for ", n_spots, " spots")
-  vmessage("  Average neighbors per spot: ", round(mean(lengths(neighbor_list)), 1))
+  vmessage("  Spots: ", n_spots)
+  vmessage("  Mean neighbors: ", round(mean(lengths(neighbor_list)), 1))
   
   neighbor_list
 }
@@ -97,6 +103,7 @@ calculate_neighbor_fractions <- function(deconv, neighbors) {
     if (length(neighbor_idx) > 0) {
       neighbor_frac[i, ] <- colMeans(deconv[neighbor_idx, , drop = FALSE])
     } else {
+      # If no neighbors, use own values
       neighbor_frac[i, ] <- deconv[i, ]
     }
   }
@@ -106,21 +113,29 @@ calculate_neighbor_fractions <- function(deconv, neighbors) {
 
 #' Spatial Clustering Based on Cell Type Composition
 #'
-#' @description Perform neighborhood-aware clustering of spatial spots based on
-#'   both their own cell type composition and local neighborhood composition.
+#' @description Perform clustering of spatial spots based on cell type
+#'   composition with optional neighborhood information.
 #'
 #' @param deconv Deconvolution result (STRIDER object or matrix)
 #' @param coords Spatial coordinates data frame
 #' @param n.clusters Number of clusters (default: 5)
 #' @param weight Weight for spot's own composition vs neighbors (default: 0.5)
-#'   - 1.0: only own composition
-#'   - 0.0: only neighbor composition
-#'   - 0.5: equal weight (default)
+#'   \itemize{
+#'     \item 1.0: only own composition
+#'     \item 0.0: only neighbor composition
+#'     \item 0.5: equal weight (default)
+#'   }
 #' @param k Number of neighbors for local composition (default: 6)
-#' @param method Clustering method: "kmeans", "hierarchical" (default: "kmeans")
+#' @param method Clustering method: "kmeans" or "hierarchical" (default: "kmeans")
 #' @param seed Random seed
 #'
 #' @return A data frame with spot coordinates and cluster assignments
+#'
+#' @details
+#' The clustering combines each spot's own cell type composition with the
+#' average composition of its spatial neighbors. This produces spatially
+#' coherent clusters that reflect local tissue microenvironments.
+#'
 #' @export
 #'
 #' @examples
@@ -145,8 +160,8 @@ spatial_cluster <- function(deconv, coords, n.clusters = 5, weight = 0.5,
     rlang::abort("No matching spots between deconv and coords")
   }
   
-  deconv_mat <- deconv_mat[common_spots, ]
-  coords <- coords[common_spots, ]
+  deconv_mat <- deconv_mat[common_spots, , drop = FALSE]
+  coords <- coords[common_spots, , drop = FALSE]
   
   # Find neighbors
   neighbors <- find_neighbors(coords, k = k)
@@ -161,7 +176,7 @@ spatial_cluster <- function(deconv, coords, n.clusters = 5, weight = 0.5,
   set.seed(seed)
   
   if (method == "kmeans") {
-    km <- stats::kmeans(combined_frac, centers = n.clusters, iter.max = 1000, nstart = 10)
+    km <- stats::kmeans(combined_frac, centers = n.clusters, iter.max = 1000, nstart = 25)
     clusters <- km$cluster
   } else if (method == "hierarchical") {
     dist_mat <- stats::dist(combined_frac)
@@ -174,17 +189,17 @@ spatial_cluster <- function(deconv, coords, n.clusters = 5, weight = 0.5,
   # Create result data frame
   result <- data.frame(
     spot = rownames(coords),
-    x = coords$x,
-    y = coords$y,
-    cluster = as.factor(clusters),
+    x = as.numeric(coords[, 1]),
+    y = as.numeric(coords[, 2]),
+    cluster = factor(clusters, levels = seq_len(n.clusters)),
     row.names = rownames(coords)
   )
   
   vmessage("  Clustered ", nrow(result), " spots into ", n.clusters, " clusters")
   
-  # Add cluster sizes
+  # Report cluster sizes
   cluster_sizes <- table(result$cluster)
-  vmessage("  Cluster sizes: ", paste(cluster_sizes, collapse = ", "))
+  vmessage("  Cluster sizes: ", paste(names(cluster_sizes), "=", cluster_sizes, collapse = ", "))
   
   result
 }
@@ -217,18 +232,21 @@ cluster_composition <- function(deconv, clusters) {
   
   # Align
   common <- intersect(names(cluster_vec), rownames(deconv_mat))
-  deconv_mat <- deconv_mat[common, ]
+  if (length(common) == 0) {
+    rlang::abort("No matching spots between deconv and clusters")
+  }
+  
+  deconv_mat <- deconv_mat[common, , drop = FALSE]
   cluster_vec <- cluster_vec[common]
   
   # Calculate mean composition per cluster
   cluster_levels <- sort(unique(cluster_vec))
   
-  composition <- sapply(cluster_levels, function(cl) {
+  composition <- t(sapply(cluster_levels, function(cl) {
     idx <- cluster_vec == cl
     colMeans(deconv_mat[idx, , drop = FALSE])
-  })
+  }))
   
-  composition <- t(composition)
   rownames(composition) <- paste0("Cluster_", cluster_levels)
   
   as.data.frame(composition)
@@ -237,14 +255,14 @@ cluster_composition <- function(deconv, clusters) {
 #' Find Enriched Cell Types per Cluster
 #'
 #' @description Identify cell types that are enriched in each cluster compared
-#'   to the overall distribution.
+#'   to the overall distribution using statistical testing.
 #'
 #' @param deconv Deconvolution matrix (spots x celltypes)
 #' @param clusters Cluster assignments
 #' @param method Statistical test: "wilcox" or "t" (default: "wilcox")
 #' @param p.adjust.method P-value adjustment method (default: "BH")
 #'
-#' @return Data frame with enrichment statistics
+#' @return Data frame with enrichment statistics per cluster-celltype pair
 #' @export
 find_cluster_markers <- function(deconv, clusters, method = "wilcox",
                                   p.adjust.method = "BH") {
@@ -265,9 +283,9 @@ find_cluster_markers <- function(deconv, clusters, method = "wilcox",
     cluster_vec <- clusters
   }
   
-  # Align
+  # Align data
   common <- intersect(names(cluster_vec), rownames(deconv_mat))
-  deconv_mat <- deconv_mat[common, ]
+  deconv_mat <- deconv_mat[common, , drop = FALSE]
   cluster_vec <- cluster_vec[common]
   
   cluster_levels <- sort(unique(cluster_vec))
@@ -280,26 +298,24 @@ find_cluster_markers <- function(deconv, clusters, method = "wilcox",
       in_cluster <- deconv_mat[cluster_vec == cl, ct]
       out_cluster <- deconv_mat[cluster_vec != cl, ct]
       
-      # Mean difference
+      # Effect size: mean difference
       mean_diff <- mean(in_cluster) - mean(out_cluster)
       
       # Statistical test
-      if (method == "wilcox") {
-        test_result <- tryCatch({
+      test_result <- tryCatch({
+        if (method == "wilcox") {
           stats::wilcox.test(in_cluster, out_cluster, alternative = "greater")
-        }, error = function(e) list(p.value = 1))
-      } else {
-        test_result <- tryCatch({
+        } else {
           stats::t.test(in_cluster, out_cluster, alternative = "greater")
-        }, error = function(e) list(p.value = 1))
-      }
+        }
+      }, error = function(e) list(p.value = 1))
       
       data.frame(
         cluster = cl,
         celltype = ct,
         mean_in = mean(in_cluster),
         mean_out = mean(out_cluster),
-        mean_diff = mean_diff,
+        diff = mean_diff,
         p_val = test_result$p.value,
         stringsAsFactors = FALSE
       )
@@ -309,11 +325,52 @@ find_cluster_markers <- function(deconv, clusters, method = "wilcox",
   }
   
   result_df <- do.call(rbind, results)
-  result_df$p_val_adj <- stats::p.adjust(result_df$p_val, method = p.adjust.method)
+  result_df$p_adj <- stats::p.adjust(result_df$p_val, method = p.adjust.method)
   
-  # Sort by cluster and mean difference
-  result_df <- result_df[order(result_df$cluster, -result_df$mean_diff), ]
+  # Sort by cluster and difference
+  result_df <- result_df[order(result_df$cluster, -result_df$diff), ]
   rownames(result_df) <- NULL
   
   result_df
+}
+
+#' Calculate Silhouette Score for Clustering
+#'
+#' @description Calculate silhouette score to assess clustering quality.
+#'
+#' @param deconv Deconvolution matrix
+#' @param clusters Cluster assignments
+#'
+#' @return Average silhouette score
+#' @export
+cluster_silhouette <- function(deconv, clusters) {
+  
+  if (!requireNamespace("cluster", quietly = TRUE)) {
+    rlang::abort("Package 'cluster' is required. Install with: install.packages('cluster')")
+  }
+  
+  # Extract data
+  if (inherits(deconv, "STRIDER")) {
+    deconv_mat <- deconv$deconv
+  } else {
+    deconv_mat <- as.matrix(deconv)
+  }
+  
+  if (is.data.frame(clusters)) {
+    cluster_vec <- as.integer(clusters$cluster)
+    names(cluster_vec) <- rownames(clusters)
+  } else {
+    cluster_vec <- as.integer(clusters)
+  }
+  
+  # Align
+  common <- intersect(names(cluster_vec), rownames(deconv_mat))
+  deconv_mat <- deconv_mat[common, , drop = FALSE]
+  cluster_vec <- cluster_vec[common]
+  
+  # Calculate silhouette
+  dist_mat <- stats::dist(deconv_mat)
+  sil <- cluster::silhouette(cluster_vec, dist_mat)
+  
+  mean(sil[, "sil_width"])
 }

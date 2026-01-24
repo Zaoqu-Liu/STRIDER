@@ -1,67 +1,59 @@
 Package: STRIDER
 Type: Package
-Title: Spatial Transcriptomics Deconvolution by Topic Modeling in R
+Title: Spatial Transcriptomics Deconvolution and Integration in R
 Version: 1.0.0
-Date: 2024-01-25
-Authors@R: c(
-    person("Zaoqu", "Liu", email = "liuzaoqu@163.com", role = c("aut", "cre"),
-           comment = c(ORCID = "0000-0002-0452-742X")),
-    person("Dongqing", "Sun", role = "ctb", comment = "Original STRIDE Python implementation")
-    )
-Description: STRIDER (Spatial TRanscrIptomics DEconvolution in R) is a comprehensive 
-    R implementation for cell-type deconvolution of spatial transcriptomics data using 
-    topic modeling (LDA). It integrates single-cell RNA-seq reference data to decompose 
-    cell-type proportions in spatial spots, with support for multi-sample integration 
-    using Fused Gromov-Wasserstein optimal transport, neighborhood-aware clustering, 
-    and spot-to-cell mapping.
+Date: 2026-01-25
+Authors@R: 
+    person("Zaoqu", "Liu", 
+           email = "liuzaoqu@163.com",
+           role = c("aut", "cre"),
+           comment = c(ORCID = "0000-0002-4386-2787"))
+Description: STRIDER (Spatial Transcriptomics deconvolutIon and integration in R) 
+    provides comprehensive tools for analyzing spatial transcriptomics data. 
+    The package implements topic modeling based deconvolution using Latent 
+    Dirichlet Allocation (LDA) to decompose spatial spots into cell type 
+    proportions. It also provides multi-sample integration using Fused 
+    Gromov-Wasserstein (FGW) optimal transport, spatial clustering with 
+    neighborhood awareness, and visualization functions. STRIDER is designed 
+    to work seamlessly with Seurat objects (v4 and v5) and supports various 
+    input formats including 10X Genomics HDF5 files.
 License: MIT + file LICENSE
 URL: https://github.com/Zaoqu-Liu/STRIDER
 BugReports: https://github.com/Zaoqu-Liu/STRIDER/issues
 Encoding: UTF-8
 LazyData: true
+RoxygenNote: 7.3.3
 Depends: 
     R (>= 4.0.0)
 Imports:
     Matrix,
     methods,
     stats,
-    utils,
-    Rcpp (>= 1.0.0),
+    rlang (>= 1.0.0),
     data.table,
-    ggplot2,
-    scales,
-    RColorBrewer,
+    ggplot2 (>= 3.4.0),
     viridis,
-    scatterpie,
-    patchwork,
-    text2vec,
-    FNN,
-    irlba,
-    uwot,
-    future,
-    future.apply,
-    progressr,
-    cli,
-    rlang
+    Rcpp (>= 1.0.0)
 Suggests:
-    Seurat (>= 4.0.0),
-    SeuratObject,
+    text2vec (>= 0.6.0),
+    FNN,
+    scatterpie,
     hdf5r,
     rhdf5,
-    SingleCellExperiment,
-    SummarizedExperiment,
-    presto,
+    SeuratObject,
+    patchwork,
+    future,
+    future.apply,
+    igraph,
+    cluster,
     testthat (>= 3.0.0),
     knitr,
-    rmarkdown,
-    BiocStyle
+    rmarkdown
 LinkingTo:
     Rcpp,
     RcppArmadillo
-RoxygenNote: 7.3.0
+NeedsCompilation: yes
+SystemRequirements: C++11, GNU make
 VignetteBuilder: knitr
 Config/testthat/edition: 3
 Roxygen: list(markdown = TRUE)
-SystemRequirements: C++11
-NeedsCompilation: yes
-Biarch: true

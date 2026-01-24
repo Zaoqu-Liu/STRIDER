@@ -1,29 +1,35 @@
 // STRIDER: Fused Gromov-Wasserstein Optimal Transport Implementation
 // Author: Zaoqu Liu (liuzaoqu@163.com)
 // 
-// This file implements the Fused Gromov-Wasserstein (FGW) distance computation
-// for spatial transcriptomics sample integration.
+// Implementation of Fused Gromov-Wasserstein (FGW) distance for spatial
+// transcriptomics sample integration, based on:
+// 
+// Vayer, T., et al. (2020). Fused Gromov-Wasserstein distance for structured 
+// objects. Algorithms.
+//
+// Peyré, G., et al. (2016). Gromov-Wasserstein averaging of kernel and 
+// distance matrices. ICML.
 
 // [[Rcpp::depends(RcppArmadillo)]]
 #include <RcppArmadillo.h>
-#include <algorithm>
 #include <cmath>
 
 using namespace Rcpp;
 using namespace arma;
 
 // ============================================================================
-// Sinkhorn Algorithm for Optimal Transport
+// Sinkhorn Algorithm for Entropic Optimal Transport
 // ============================================================================
 
-//' Sinkhorn-Knopp Algorithm for Optimal Transport
+//' Sinkhorn-Knopp Algorithm
 //'
-//' @description Compute optimal transport plan using Sinkhorn-Knopp algorithm.
+//' @description Compute optimal transport plan using the Sinkhorn-Knopp 
+//'   algorithm with entropic regularization.
 //'
 //' @param M Cost matrix (n x m)
-//' @param p Source distribution (n)
-//' @param q Target distribution (m)
-//' @param reg Regularization parameter (default: 0.1)
+//' @param p Source distribution (n), must sum to 1
+//' @param q Target distribution (m), must sum to 1
+//' @param reg Entropic regularization parameter (default: 0.1)
 //' @param max_iter Maximum iterations (default: 1000)
 //' @param tol Convergence tolerance (default: 1e-9)
 //'
@@ -40,40 +46,39 @@ arma::mat sinkhorn_cpp(const arma::mat& M,
     int n = M.n_rows;
     int m = M.n_cols;
     
-    // Gibbs kernel
+    // Gibbs kernel: K = exp(-M / reg)
     arma::mat K = exp(-M / reg);
     
-    // Initialize dual variables
+    // Initialize scaling vectors
     arma::vec u = ones<vec>(n);
     arma::vec v = ones<vec>(m);
     
     arma::vec Kv, Ktu;
-    double err;
     
     for (int iter = 0; iter < max_iter; iter++) {
-        // Update u
+        // Save previous u for convergence check
+        arma::vec u_prev = u;
+        
+        // Update u: u = p / (K * v)
         Kv = K * v;
-        Kv = arma::clamp(Kv, 1e-300, datum::inf);  // Numerical stability
+        Kv = clamp(Kv, 1e-300, datum::inf);
         u = p / Kv;
         
-        // Update v
+        // Update v: v = q / (K^T * u)
         Ktu = K.t() * u;
-        Ktu = arma::clamp(Ktu, 1e-300, datum::inf);
+        Ktu = clamp(Ktu, 1e-300, datum::inf);
         v = q / Ktu;
         
         // Check convergence every 10 iterations
         if ((iter + 1) % 10 == 0) {
-            arma::mat T = diagmat(u) * K * diagmat(v);
-            arma::vec row_sums = sum(T, 1);
-            err = norm(row_sums - p, 1);
-            
+            double err = norm(u - u_prev, 1) / (norm(u, 1) + 1e-10);
             if (err < tol) {
                 break;
             }
         }
     }
     
-    // Compute transport plan
+    // Compute transport plan: T = diag(u) * K * diag(v)
     arma::mat T = diagmat(u) * K * diagmat(v);
     
     return T;
@@ -81,30 +86,41 @@ arma::mat sinkhorn_cpp(const arma::mat& M,
 
 
 // ============================================================================
-// Gromov-Wasserstein Distance
+// Gromov-Wasserstein Distance Functions
 // ============================================================================
 
-//' Compute Tensor-Matrix Product for GW
+//' Compute GW Gradient (Tensor Product)
 //'
-//' @description Efficiently compute the tensor-matrix product for GW update.
+//' @description Compute the gradient of GW loss w.r.t. transport plan.
+//'   For squared loss: L(C1, C2, T) = sum_{ijkl} (C1_ik - C2_jl)^2 * T_ij * T_kl
+//'   Gradient: dL/dT_ij = -4 * sum_kl C1_ik * T_kl * C2_jl = -4 * (C1 * T * C2)_ij
+//'
+//' @param C1 Source distance matrix (n x n)
+//' @param C2 Target distance matrix (m x m)
+//' @param T Current transport plan (n x m)
+//'
+//' @return Gradient matrix (n x m)
 //' @keywords internal
 // [[Rcpp::export]]
 arma::mat gwgrad_cpp(const arma::mat& C1, 
                      const arma::mat& C2, 
                      const arma::mat& T) {
-    
-    // Compute gradient: -4 * C1 * T * C2
-    // This is the key operation in GW optimization
-    
-    arma::mat grad = C1 * T * C2;
-    grad *= -4.0;
-    
-    return grad;
+    // Gradient for squared loss: -4 * C1 * T * C2
+    return -4.0 * C1 * T * C2;
 }
 
-//' Initialize Cost Matrix for GW
+//' Initialize Constant Term for GW
 //'
-//' @description Initialize the cost matrix using squared loss.
+//' @description Initialize the constant term in GW loss for squared loss.
+//'   constC = f1(C1) * p * 1_m^T + 1_n * q^T * f2(C2)^T
+//'   where f1(a) = f2(a) = a^2 for squared loss
+//'
+//' @param C1 Source distance matrix (n x n)
+//' @param C2 Target distance matrix (m x m)
+//' @param p Source distribution (n)
+//' @param q Target distribution (m)
+//'
+//' @return Constant cost matrix (n x m)
 //' @keywords internal
 // [[Rcpp::export]]
 arma::mat init_gw_cost_cpp(const arma::mat& C1, 
@@ -115,32 +131,35 @@ arma::mat init_gw_cost_cpp(const arma::mat& C1,
     int n = C1.n_rows;
     int m = C2.n_rows;
     
-    // f1(a) = a^2, f2(b) = b^2
-    // h1(a) = a, h2(b) = 2*b
+    // For squared loss: f(a) = a^2
+    // f1(C1) * p gives sum over k of C1_ik^2 * p_k for each i
+    arma::vec f1_C1_p = sum(square(C1), 1) % p;  // Element-wise: (sum_k C1_ik^2) * p_i
     
-    arma::vec f1_p = sum(square(C1), 1);  // C1^2 * p
-    arma::vec f2_q = sum(square(C2), 1);  // C2^2 * q
+    // Actually, the constant term is:
+    // sum_k C1_ik^2 * p_k (weighted by p over columns of C1^2)
+    arma::vec row_term = square(C1) * p;  // n x 1
+    arma::vec col_term = square(C2) * q;  // m x 1
     
-    // Constant term: f1(C1) * p * 1_m^T + 1_n * q^T * f2(C2)^T
-    arma::mat constC = f1_p * ones<rowvec>(m) + ones<vec>(n) * f2_q.t();
+    // constC_ij = sum_k C1_ik^2 * p_k + sum_l C2_jl^2 * q_l
+    arma::mat constC = row_term * ones<rowvec>(m) + ones<vec>(n) * col_term.t();
     
     return constC;
 }
 
 //' Gromov-Wasserstein Distance
 //'
-//' @description Compute Gromov-Wasserstein distance between two metric spaces.
+//' @description Compute Gromov-Wasserstein distance between two metric spaces
+//'   using conditional gradient descent with Sinkhorn projections.
 //'
-//' @param C1 Distance matrix for source (n x n)
-//' @param C2 Distance matrix for target (m x m)
+//' @param C1 Source distance matrix (n x n)
+//' @param C2 Target distance matrix (m x m)
 //' @param p Source distribution (n)
 //' @param q Target distribution (m)
-//' @param loss_fun Loss function: "square" (default) or "kl"
-//' @param reg Sinkhorn regularization (default: 0.1)
+//' @param reg Entropic regularization (default: 0.1)
 //' @param max_iter Maximum iterations (default: 100)
 //' @param tol Convergence tolerance (default: 1e-7)
 //'
-//' @return List with transport plan and distance
+//' @return List with transport plan T and GW distance
 //' @keywords internal
 // [[Rcpp::export]]
 List gw_cpp(const arma::mat& C1, 
@@ -151,13 +170,10 @@ List gw_cpp(const arma::mat& C1,
             int max_iter = 100,
             double tol = 1e-7) {
     
-    int n = C1.n_rows;
-    int m = C2.n_rows;
-    
-    // Initialize with product of marginals
+    // Initialize transport plan with outer product of marginals
     arma::mat T = p * q.t();
     
-    // Constant cost matrix
+    // Constant term in GW loss
     arma::mat constC = init_gw_cost_cpp(C1, C2, p, q);
     
     double prev_loss = datum::inf;
@@ -166,14 +182,14 @@ List gw_cpp(const arma::mat& C1,
         // Compute gradient
         arma::mat tens = gwgrad_cpp(C1, C2, T);
         
-        // Cost matrix for this iteration
+        // Total cost matrix
         arma::mat M = constC + tens;
         
-        // Sinkhorn update
-        T = sinkhorn_cpp(M, p, q, reg, 100, 1e-7);
+        // Sinkhorn projection
+        T = sinkhorn_cpp(M, p, q, reg, 100, 1e-8);
         
-        // Compute loss
-        double loss = accu(M % T);
+        // Compute GW loss
+        double loss = accu(M % T);  // Element-wise product and sum
         
         // Check convergence
         if (std::abs(prev_loss - loss) < tol) {
@@ -200,22 +216,39 @@ List gw_cpp(const arma::mat& C1,
 
 //' Fused Gromov-Wasserstein Distance
 //'
-//' @description Compute Fused Gromov-Wasserstein distance combining feature
-//'   similarity and structural similarity.
+//' @description Compute Fused Gromov-Wasserstein (FGW) distance, which combines
+//'   feature-based Wasserstein distance and structure-based Gromov-Wasserstein
+//'   distance.
 //'
-//' @param M Feature distance matrix (n x m)
-//' @param C1 Spatial distance matrix for source (n x n)
-//' @param C2 Spatial distance matrix for target (m x m)
-//' @param p Source distribution (n)
-//' @param q Target distribution (m)
-//' @param alpha Trade-off parameter (default: 0.5)
-//'   - 0: pure OT (only feature similarity)
-//'   - 1: pure GW (only structural similarity)
-//' @param reg Sinkhorn regularization (default: 0.1)
+//' @param M Feature distance/cost matrix (n x m)
+//' @param C1 Source structural distance matrix (n x n)
+//' @param C2 Target structural distance matrix (m x m)
+//' @param p Source distribution (n), must sum to 1
+//' @param q Target distribution (m), must sum to 1
+//' @param alpha Trade-off parameter in [0, 1] (default: 0.5)
+//'   \itemize{
+//'     \item alpha = 0: pure Wasserstein (only feature cost)
+//'     \item alpha = 1: pure GW (only structural cost)
+//'   }
+//' @param reg Entropic regularization (default: 0.1)
 //' @param max_iter Maximum iterations (default: 100)
 //' @param tol Convergence tolerance (default: 1e-7)
 //'
-//' @return List with transport plan and distance
+//' @return List with:
+//'   \itemize{
+//'     \item T: Optimal transport plan (n x m)
+//'     \item fgw_dist: FGW distance value
+//'   }
+//'
+//' @details
+//' The FGW distance is defined as:
+//' FGW(p,q) = min_T (1-alpha) * <M, T> + alpha * GW(C1, C2, T)
+//' subject to T * 1 = p, T^T * 1 = q
+//'
+//' @references
+//' Vayer, T., et al. (2020). Fused Gromov-Wasserstein distance for structured 
+//' objects. Algorithms.
+//'
 //' @export
 // [[Rcpp::export]]
 List fused_gromov_wasserstein_cpp(const arma::mat& M,
@@ -228,26 +261,23 @@ List fused_gromov_wasserstein_cpp(const arma::mat& M,
                                    int max_iter = 100,
                                    double tol = 1e-7) {
     
-    int n = C1.n_rows;
-    int m = C2.n_rows;
-    
-    // Initialize with product of marginals
+    // Initialize transport plan
     arma::mat T = p * q.t();
     
-    // Constant GW cost matrix
+    // Constant term for GW
     arma::mat constC = init_gw_cost_cpp(C1, C2, p, q);
     
     double prev_loss = datum::inf;
     
     for (int iter = 0; iter < max_iter; iter++) {
-        // Compute GW gradient
+        // GW gradient
         arma::mat tens = gwgrad_cpp(C1, C2, T);
         
         // Combined cost: (1-alpha)*M + alpha*(GW cost)
         arma::mat cost = (1.0 - alpha) * M + alpha * (constC + tens);
         
-        // Sinkhorn update
-        T = sinkhorn_cpp(cost, p, q, reg, 100, 1e-7);
+        // Sinkhorn projection
+        T = sinkhorn_cpp(cost, p, q, reg, 100, 1e-8);
         
         // Compute loss
         double fgw_loss = accu(cost % T);
@@ -272,23 +302,29 @@ List fused_gromov_wasserstein_cpp(const arma::mat& M,
 
 
 // ============================================================================
-// KL Divergence
+// KL Divergence Computation
 // ============================================================================
 
 //' Compute KL Divergence Matrix
 //'
-//' @description Compute pairwise KL divergence between rows of two matrices.
+//' @description Compute pairwise KL divergence between probability distributions
+//'   (rows of P and Q).
 //'
-//' @param P Matrix 1 (n x k)
-//' @param Q Matrix 2 (m x k)
+//' @param P First matrix (n x k), rows are distributions
+//' @param Q Second matrix (m x k), rows are distributions
 //'
-//' @return KL divergence matrix (n x m)
+//' @return KL divergence matrix (n x m) where KL[i,j] = KL(P[i,] || Q[j,])
+//'
+//' @details
+//' KL(p||q) = sum_k p_k * log(p_k / q_k)
+//'
 //' @export
 // [[Rcpp::export]]
 arma::mat kl_divergence_matrix_cpp(const arma::mat& P, const arma::mat& Q) {
     
     int n = P.n_rows;
     int m = Q.n_rows;
+    int k = P.n_cols;
     
     // Normalize rows to sum to 1
     arma::mat P_norm = P;
@@ -309,21 +345,18 @@ arma::mat kl_divergence_matrix_cpp(const arma::mat& P, const arma::mat& Q) {
     }
     
     // Add small constant for numerical stability
-    P_norm = clamp(P_norm, 1e-300, 1.0);
-    Q_norm = clamp(Q_norm, 1e-300, 1.0);
+    double eps = 1e-300;
+    P_norm = clamp(P_norm, eps, 1.0);
+    Q_norm = clamp(Q_norm, eps, 1.0);
     
-    // Log matrices
-    arma::mat logP = log(P_norm);
-    arma::mat logQ = log(Q_norm);
-    
-    // KL(P||Q) = sum_k P_k * (log(P_k) - log(Q_k))
+    // Compute KL divergence matrix
     arma::mat KL = zeros<mat>(n, m);
     
     for (int i = 0; i < n; i++) {
         for (int j = 0; j < m; j++) {
             double kl = 0.0;
-            for (int k = 0; k < (int)P_norm.n_cols; k++) {
-                kl += P_norm(i, k) * (logP(i, k) - logQ(j, k));
+            for (int d = 0; d < k; d++) {
+                kl += P_norm(i, d) * (log(P_norm(i, d)) - log(Q_norm(j, d)));
             }
             KL(i, j) = kl;
         }
@@ -339,10 +372,11 @@ arma::mat kl_divergence_matrix_cpp(const arma::mat& P, const arma::mat& Q) {
 
 //' Compute Euclidean Distance Matrix
 //'
-//' @description Fast computation of pairwise Euclidean distance matrix.
+//' @description Compute pairwise Euclidean distances between points.
 //'
-//' @param X Matrix (n x d)
-//' @param Y Matrix (m x d), optional. If NULL, compute self-distance.
+//' @param X First point set (n x d)
+//' @param Y_nullable Second point set (m x d), optional. If NULL, computes
+//'   pairwise distances within X.
 //'
 //' @return Distance matrix (n x m or n x n)
 //' @export
@@ -350,19 +384,24 @@ arma::mat kl_divergence_matrix_cpp(const arma::mat& P, const arma::mat& Q) {
 arma::mat euclidean_distance_cpp(const arma::mat& X, 
                                   Rcpp::Nullable<Rcpp::NumericMatrix> Y_nullable = R_NilValue) {
     
-    arma::mat XX = sum(square(X), 1);
+    // Squared norms of X
+    arma::vec XX = sum(square(X), 1);
     
     if (Y_nullable.isNull()) {
-        // Self-distance
-        arma::mat D2 = XX * ones<rowvec>(X.n_rows) + ones<vec>(X.n_rows) * XX.t() - 2 * X * X.t();
-        D2 = clamp(D2, 0.0, datum::inf);  // Ensure non-negative
+        // Self-distance: D[i,j] = ||X[i] - X[j]||
+        // = sqrt(||X[i]||^2 + ||X[j]||^2 - 2*X[i]'*X[j])
+        int n = X.n_rows;
+        arma::mat D2 = XX * ones<rowvec>(n) + ones<vec>(n) * XX.t() - 2.0 * X * X.t();
+        D2 = clamp(D2, 0.0, datum::inf);  // Handle numerical errors
         return sqrt(D2);
     } else {
         Rcpp::NumericMatrix Y_rcpp(Y_nullable);
         arma::mat Y = as<arma::mat>(Y_rcpp);
-        arma::mat YY = sum(square(Y), 1);
+        arma::vec YY = sum(square(Y), 1);
         
-        arma::mat D2 = XX * ones<rowvec>(Y.n_rows) + ones<vec>(X.n_rows) * YY.t() - 2 * X * Y.t();
+        int n = X.n_rows;
+        int m = Y.n_rows;
+        arma::mat D2 = XX * ones<rowvec>(m) + ones<vec>(n) * YY.t() - 2.0 * X * Y.t();
         D2 = clamp(D2, 0.0, datum::inf);
         return sqrt(D2);
     }
@@ -370,19 +409,24 @@ arma::mat euclidean_distance_cpp(const arma::mat& X,
 
 
 // ============================================================================
-// SVD-based Rotation
+// Procrustes Analysis
 // ============================================================================
 
-//' Compute Optimal Rotation Matrix via SVD
+//' Compute Optimal Rotation via SVD
 //'
-//' @description Compute the optimal rotation matrix to align two point sets
-//'   using singular value decomposition (Procrustes analysis).
+//' @description Find the optimal rotation matrix R to align X to Y 
+//'   using Procrustes analysis (SVD of cross-covariance).
 //'
 //' @param X Source points (n x d)
 //' @param Y Target points (n x d)
 //' @param weights Point weights (n)
 //'
-//' @return Rotation matrix (d x d)
+//' @return Rotation matrix R (d x d) such that X * R aligns with Y
+//'
+//' @details
+//' Minimizes sum_i w_i * ||X[i] * R - Y[i]||^2
+//' Solution: R = U * V^T where H = Y^T * W * X = U * S * V^T
+//'
 //' @export
 // [[Rcpp::export]]
 arma::mat compute_rotation_svd_cpp(const arma::mat& X, 
@@ -393,15 +437,15 @@ arma::mat compute_rotation_svd_cpp(const arma::mat& X,
     arma::mat W = diagmat(weights);
     arma::mat H = Y.t() * W * X;
     
-    // SVD
+    // SVD: H = U * S * V^T
     arma::mat U, V;
     arma::vec s;
     svd(U, s, V, H);
     
-    // Rotation matrix
+    // Optimal rotation: R = U * V^T
     arma::mat R = U * V.t();
     
-    // Handle reflection (ensure proper rotation)
+    // Handle reflection (ensure det(R) = 1)
     if (det(R) < 0) {
         V.col(V.n_cols - 1) *= -1;
         R = U * V.t();
@@ -411,28 +455,24 @@ arma::mat compute_rotation_svd_cpp(const arma::mat& X,
 }
 
 
-// ============================================================================
-// Center Points
-// ============================================================================
-
 //' Center Points by Weighted Mean
 //'
-//' @description Center point coordinates by subtracting the weighted mean.
+//' @description Center point coordinates by subtracting the weighted centroid.
 //'
 //' @param X Points (n x d)
-//' @param weights Point weights (n)
+//' @param weights Point weights (n), should sum to 1
 //'
 //' @return Centered points (n x d)
 //' @export
 // [[Rcpp::export]]
 arma::mat center_points_cpp(const arma::mat& X, const arma::vec& weights) {
     
-    // Weighted mean
-    arma::rowvec mean = (weights.t() * X);
-    mean /= accu(weights);
+    // Weighted centroid: sum_i w_i * X[i]
+    arma::rowvec centroid = weights.t() * X;
+    centroid /= accu(weights);
     
-    // Center
-    arma::mat X_centered = X.each_row() - mean;
+    // Center by subtracting centroid
+    arma::mat X_centered = X.each_row() - centroid;
     
     return X_centered;
 }
