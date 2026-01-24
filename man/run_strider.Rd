@@ -19,7 +19,8 @@ run_strider(
   seed = 42,
   out.dir = ".",
   out.prefix = "STRIDER",
-  save.model = TRUE
+  save.model = TRUE,
+  backend = "auto"
 )
 }
 \arguments{
@@ -69,6 +70,10 @@ Default: seq(n_celltypes, 3*n_celltypes)}
 \item{out.prefix}{Output file prefix (default: "STRIDER")}
 
 \item{save.model}{Save trained model (default: TRUE)}
+
+\item{backend}{Computational backend: "auto", "python", or "r" (default: "auto").
+When "auto", uses Python backend (gensim, POT, scanpy) if available for
+exact equivalence with the original STRIDE implementation.}
 }
 \value{
 A STRIDER object containing:

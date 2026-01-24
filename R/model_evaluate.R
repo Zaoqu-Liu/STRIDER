@@ -212,6 +212,9 @@ cluster_in_topic_space <- function(topic_cell, true_celltypes,
 #' @param seed Random seed
 #' @param save.models Save intermediate models (default: FALSE)
 #' @param out.dir Output directory for models
+#' @param backend Computational backend: "auto", "python", or "r" (default: "auto").
+#'   When "auto", uses Python gensim if available for exact equivalence
+#'   with the original STRIDE implementation.
 #'
 #' @return A list containing:
 #'   \itemize{
@@ -230,9 +233,22 @@ cluster_in_topic_space <- function(topic_cell, true_celltypes,
 evaluate_topic_range <- function(matrix, celltypes, topic_range,
                                   methods = c("Raw", "Norm", "NormBySD", "Bayes", "BayesNorm"),
                                   n.iter = 500, seed = 42,
-                                  save.models = FALSE, out.dir = NULL) {
+                                  save.models = FALSE, out.dir = NULL,
+                                  backend = "auto") {
   
   vmessage("Evaluating ", length(topic_range), " topic configurations...")
+  
+  # Select backend
+  if (backend == "auto") {
+    backend <- if (check_python_backend(c("gensim", "numpy"))) "python" else "r"
+  }
+  
+  # Select training function based on backend
+  train_lda_fn <- if (backend == "python" && check_python_backend(c("gensim", "numpy"))) {
+    train_lda_gensim
+  } else {
+    train_lda
+  }
   
   # Store results
   all_metrics <- list()
@@ -247,7 +263,7 @@ evaluate_topic_range <- function(matrix, celltypes, topic_range,
     vmessage("\n=== Number of topics: ", n_topics, " ===")
     
     # Train model
-    model <- train_lda(matrix, n.topics = n_topics, n.iter = n.iter, seed = seed)
+    model <- train_lda_fn(matrix, n.topics = n_topics, n.iter = n.iter, seed = seed)
     
     # Calculate topic-celltype association
     topic_celltype <- calculate_topic_celltype(model$topic_cell, celltypes)
@@ -257,8 +273,12 @@ evaluate_topic_range <- function(matrix, celltypes, topic_range,
       topic_celltype, celltype_counts, total_cells
     )
     
-    # Calculate coherence
-    coherence <- calculate_coherence(model, matrix)
+    # Calculate coherence (use gensim if available for both u_mass and c_v)
+    if (backend == "python" && inherits(model, "strider_lda_gensim")) {
+      coherence <- calculate_coherence_gensim(model, matrix, coherence_type = "both")
+    } else {
+      coherence <- calculate_coherence(model, matrix, type = "both")
+    }
     
     # Evaluate with different methods
     method_accuracies <- numeric(length(methods))
@@ -278,15 +298,19 @@ evaluate_topic_range <- function(matrix, celltypes, topic_range,
     # K-means clustering NMI
     cluster_result <- cluster_in_topic_space(model$topic_cell, celltypes)
     
-    # Store metrics
+    # Store metrics - include both umass and cv coherence
     metrics <- data.frame(
       n_topics = n_topics,
-      coherence = coherence$mean,
+      umass_coherence = coherence$umass,
+      cv_coherence = if (!is.null(coherence$cv) && !is.na(coherence$cv)) coherence$cv else NA,
       nmi = cluster_result$nmi,
       t(method_accuracies),
       stringsAsFactors = FALSE
     )
-    colnames(metrics)[4:ncol(metrics)] <- paste0(methods, "_accuracy")
+    colnames(metrics)[5:ncol(metrics)] <- paste0(methods, "_accuracy")
+    
+    # Keep backward compatibility
+    metrics$coherence <- metrics$umass_coherence
     
     all_metrics[[as.character(n_topics)]] <- metrics
     all_models[[as.character(n_topics)]] <- list(

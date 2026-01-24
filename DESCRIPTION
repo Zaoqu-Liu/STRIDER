@@ -47,6 +47,7 @@ Suggests:
     future.apply,
     igraph,
     cluster,
+    reticulate (>= 1.26),
     testthat (>= 3.0.0),
     knitr,
     rmarkdown

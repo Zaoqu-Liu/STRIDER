@@ -12,7 +12,8 @@ integrate_samples(
   alpha = 0.5,
   reg = 0.1,
   max.iter = 100,
-  seed = 42
+  seed = 42,
+  backend = "auto"
 )
 }
 \arguments{
@@ -35,6 +36,10 @@ integrate_samples(
 \item{max.iter}{Maximum iterations for FGW (default: 100)}
 
 \item{seed}{Random seed}
+
+\item{backend}{Computational backend: "auto", "python", or "r" (default: "auto").
+When "auto", uses Python POT library if available for exact equivalence
+with the original STRIDE implementation.}
 }
 \value{
 A list containing:

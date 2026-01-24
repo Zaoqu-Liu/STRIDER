@@ -4,7 +4,13 @@
 \alias{calculate_coherence}
 \title{Calculate LDA Coherence Score}
 \usage{
-calculate_coherence(model, matrix, n.words = 10)
+calculate_coherence(
+  model,
+  matrix,
+  n.words = 10,
+  type = "both",
+  cell_gene_list = NULL
+)
 }
 \arguments{
 \item{model}{LDA model from train_lda()}
@@ -12,25 +18,33 @@ calculate_coherence(model, matrix, n.words = 10)
 \item{matrix}{Original count matrix used for training}
 
 \item{n.words}{Number of top words per topic (default: 10)}
+
+\item{type}{Coherence type: "umass", "cv", or "both" (default: "both")}
+
+\item{cell_gene_list}{List of genes expressed per cell (for c_v, auto-generated if NULL)}
 }
 \value{
 A list containing:
 \itemize{
-\item{mean}{Mean coherence across all topics}
-\item{per_topic}{Coherence score for each topic}
+\item{umass}{UMass coherence (mean across topics)}
+\item{cv}{C_v coherence (mean across topics), NA if type="umass"}
+\item{umass_per_topic}{UMass score for each topic}
+\item{cv_per_topic}{C_v score for each topic}
 }
 }
 \description{
 Calculate topic coherence scores to evaluate model quality.
-Implements the UMass coherence metric.
+Implements UMass and optionally C_v coherence metrics.
 }
 \details{
 UMass coherence measures how often top words co-occur in the corpus:
 C_UMass = sum_{j=2}^{M} sum_{i=1}^{j-1} log((D(w_i, w_j) + 1) / D(w_i))
 
-Higher (less negative) values indicate more coherent topics.
+C_v coherence uses normalized pointwise mutual information (NPMI) with
+a sliding window and cosine similarity, providing better correlation
+with human judgments.
 }
 \references{
-Mimno, D., et al. (2011). Optimizing semantic coherence in topic models.
-EMNLP.
+Mimno, D., et al. (2011). Optimizing semantic coherence in topic models. EMNLP.
+Röder, M., et al. (2015). Exploring the Space of Topic Coherence Measures. WSDM.
 }

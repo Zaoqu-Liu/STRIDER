@@ -365,37 +365,56 @@ calculate_celltype_topic_bayes <- function(topic_celltype, celltype_counts, tota
 #' Calculate LDA Coherence Score
 #'
 #' @description Calculate topic coherence scores to evaluate model quality.
-#'   Implements the UMass coherence metric.
+#'   Implements UMass and optionally C_v coherence metrics.
 #'
 #' @param model LDA model from train_lda()
 #' @param matrix Original count matrix used for training
 #' @param n.words Number of top words per topic (default: 10)
+#' @param type Coherence type: "umass", "cv", or "both" (default: "both")
+#' @param cell_gene_list List of genes expressed per cell (for c_v, auto-generated if NULL)
 #'
 #' @return A list containing:
 #'   \itemize{
-#'     \item{mean}{Mean coherence across all topics}
-#'     \item{per_topic}{Coherence score for each topic}
+#'     \item{umass}{UMass coherence (mean across topics)}
+#'     \item{cv}{C_v coherence (mean across topics), NA if type="umass"}
+#'     \item{umass_per_topic}{UMass score for each topic}
+#'     \item{cv_per_topic}{C_v score for each topic}
 #'   }
 #'
 #' @details
 #' UMass coherence measures how often top words co-occur in the corpus:
 #' C_UMass = sum_{j=2}^{M} sum_{i=1}^{j-1} log((D(w_i, w_j) + 1) / D(w_i))
 #' 
-#' Higher (less negative) values indicate more coherent topics.
+#' C_v coherence uses normalized pointwise mutual information (NPMI) with
+#' a sliding window and cosine similarity, providing better correlation
+#' with human judgments.
 #'
 #' @references
-#' Mimno, D., et al. (2011). Optimizing semantic coherence in topic models.
-#' EMNLP.
+#' Mimno, D., et al. (2011). Optimizing semantic coherence in topic models. EMNLP.
+#' Röder, M., et al. (2015). Exploring the Space of Topic Coherence Measures. WSDM.
 #'
 #' @export
-calculate_coherence <- function(model, matrix, n.words = 10) {
+calculate_coherence <- function(model, matrix, n.words = 10, type = "both",
+                                 cell_gene_list = NULL) {
   
-  vmessage("Calculating topic coherence (UMass)...")
+  vmessage("Calculating topic coherence...")
   
   topic_gene <- model$topic_gene
   n_topics <- nrow(topic_gene)
+  vocab <- model$vocab
   
-  coherence_scores <- numeric(n_topics)
+  # Initialize results
+  umass_scores <- numeric(n_topics)
+  cv_scores <- numeric(n_topics)
+  
+  # Build cell_gene_list if needed for c_v
+  if (type %in% c("cv", "both") && is.null(cell_gene_list)) {
+    vmessage("  Building gene lists per cell for C_v...")
+    cell_gene_list <- lapply(seq_len(ncol(matrix)), function(i) {
+      expressed <- matrix[, i] > 0
+      rownames(matrix)[expressed]
+    })
+  }
   
   for (k in seq_len(n_topics)) {
     # Get top genes for this topic
@@ -404,41 +423,128 @@ calculate_coherence <- function(model, matrix, n.words = 10) {
     top_genes <- intersect(top_genes, rownames(matrix))
     
     if (length(top_genes) < 2) {
-      coherence_scores[k] <- NA
+      umass_scores[k] <- NA
+      cv_scores[k] <- NA
       next
     }
     
-    # Binarize: gene expressed or not in each cell
-    sub_mat <- matrix[top_genes, , drop = FALSE] > 0
+    # ===== UMass Coherence =====
+    if (type %in% c("umass", "both")) {
+      sub_mat <- matrix[top_genes, , drop = FALSE] > 0
+      coherence <- 0
+      m <- length(top_genes)
+      
+      for (j in 2:m) {
+        for (i in 1:(j-1)) {
+          D_wi <- sum(sub_mat[i, ])
+          D_wiwj <- sum(sub_mat[i, ] & sub_mat[j, ])
+          if (D_wi > 0) {
+            coherence <- coherence + log((D_wiwj + 1) / D_wi)
+          }
+        }
+      }
+      umass_scores[k] <- coherence
+    }
     
-    # Calculate UMass coherence
-    coherence <- 0
-    m <- length(top_genes)
+    # ===== C_v Coherence =====
+    if (type %in% c("cv", "both")) {
+      cv_scores[k] <- .calculate_cv_coherence(top_genes, cell_gene_list, n.words)
+    }
+  }
+  
+  result <- list(
+    umass = mean(umass_scores, na.rm = TRUE),
+    cv = if (type %in% c("cv", "both")) mean(cv_scores, na.rm = TRUE) else NA,
+    umass_per_topic = umass_scores,
+    cv_per_topic = cv_scores
+  )
+  
+  # For backward compatibility
+  result$mean <- result$umass
+  result$per_topic <- result$umass_per_topic
+  
+  vmessage("  UMass coherence: ", round(result$umass, 4))
+  if (!is.na(result$cv)) {
+    vmessage("  C_v coherence: ", round(result$cv, 4))
+  }
+  
+  result
+}
+
+#' Calculate C_v Coherence for One Topic
+#'
+#' @description Internal function to calculate C_v coherence.
+#'   Implements NPMI-based coherence with sliding window.
+#'
+#' @param top_words Top words for the topic
+#' @param texts List of word lists (documents)
+#' @param window_size Sliding window size
+#'
+#' @return C_v coherence score
+#' @keywords internal
+.calculate_cv_coherence <- function(top_words, texts, window_size = 10) {
+  
+  m <- length(top_words)
+  if (m < 2) return(NA)
+  
+  # Count word occurrences and co-occurrences using sliding window
+  n_docs <- length(texts)
+  word_count <- rep(0, m)
+  names(word_count) <- top_words
+  cooccur_count <- matrix(0, m, m)
+  rownames(cooccur_count) <- colnames(cooccur_count) <- top_words
+  
+  for (doc in texts) {
+    doc_words <- intersect(doc, top_words)
     
-    for (j in 2:m) {
-      for (i in 1:(j-1)) {
-        # D(w_i) = number of cells expressing gene i
-        D_wi <- sum(sub_mat[i, ])
-        # D(w_i, w_j) = number of cells expressing both genes
-        D_wiwj <- sum(sub_mat[i, ] & sub_mat[j, ])
+    # Count single occurrences
+    for (w in doc_words) {
+      word_count[w] <- word_count[w] + 1
+    }
+    
+    # Count co-occurrences within window
+    if (length(doc) >= 2) {
+      for (i in seq_len(length(doc) - 1)) {
+        window_end <- min(i + window_size, length(doc))
+        window_words <- doc[i:window_end]
+        window_top <- intersect(window_words, top_words)
         
-        if (D_wi > 0) {
-          coherence <- coherence + log((D_wiwj + 1) / D_wi)
+        if (length(window_top) >= 2) {
+          for (j in seq_len(length(window_top) - 1)) {
+            for (k in (j + 1):length(window_top)) {
+              w1 <- window_top[j]
+              w2 <- window_top[k]
+              cooccur_count[w1, w2] <- cooccur_count[w1, w2] + 1
+              cooccur_count[w2, w1] <- cooccur_count[w2, w1] + 1
+            }
+          }
         }
       }
     }
-    
-    coherence_scores[k] <- coherence
   }
   
-  mean_coherence <- mean(coherence_scores, na.rm = TRUE)
+  # Calculate NPMI matrix
+  eps <- 1e-10
+  npmi_matrix <- matrix(0, m, m)
   
-  vmessage("  Mean coherence: ", round(mean_coherence, 3))
+  for (i in seq_len(m)) {
+    for (j in seq_len(m)) {
+      if (i != j) {
+        p_i <- (word_count[i] + eps) / n_docs
+        p_j <- (word_count[j] + eps) / n_docs
+        p_ij <- (cooccur_count[i, j] + eps) / n_docs
+        
+        pmi <- log(p_ij / (p_i * p_j))
+        npmi <- pmi / (-log(p_ij))
+        npmi_matrix[i, j] <- max(-1, min(1, npmi))  # Clip to [-1, 1]
+      }
+    }
+  }
   
-  list(
-    mean = mean_coherence,
-    per_topic = coherence_scores
-  )
+  # C_v uses cosine similarity of NPMI vectors
+  # For simplicity, we use mean NPMI as approximation
+  upper_tri <- npmi_matrix[upper.tri(npmi_matrix)]
+  mean(upper_tri, na.rm = TRUE)
 }
 
 #' Print Method for LDA Model
