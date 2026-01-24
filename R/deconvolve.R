@@ -346,7 +346,10 @@ deconvolve <- function(st.matrix, model, topic_celltype,
       sweep(celltype_topic, 2, col_sums, "/")
     },
     "NormBySD" = {
-      col_sds <- apply(celltype_topic, 2, stats::sd)
+      # Use population SD (N), not sample SD (N-1), to match sklearn StandardScaler
+      col_sds <- apply(celltype_topic, 2, function(x) {
+        sqrt(mean((x - mean(x))^2))
+      })
       col_sds[col_sds == 0] <- 1
       sweep(celltype_topic, 2, col_sds, "/")
     },

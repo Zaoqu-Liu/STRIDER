@@ -278,14 +278,37 @@ center_coords <- function(coords, weights = NULL) {
 #' Compute KL Divergence Matrix
 #'
 #' @description Compute pairwise KL divergence between probability distributions.
+#'   Matches the exact implementation in Python STRIDE's KLDivergency function.
 #'
 #' @param P First matrix (n x k), rows are distributions
 #' @param Q Second matrix (m x k), rows are distributions
+#' @param eps Small constant to avoid log(0) (default: 1e-10)
 #'
 #' @return KL divergence matrix (n x m)
 #' @export
-compute_kl_divergence <- function(P, Q) {
-  kl_divergence_matrix_cpp(as.matrix(P), as.matrix(Q))
+compute_kl_divergence <- function(P, Q, eps = 1e-10) {
+  # Add small epsilon to avoid log(0), matching Python STRIDE
+  P <- as.matrix(P) + eps
+  Q <- as.matrix(Q) + eps
+  
+  # Normalize rows to sum to 1 (probability distributions)
+  P <- P / rowSums(P)
+  Q <- Q / rowSums(Q)
+  
+  # KL divergence: KL(P||Q) = sum_k p_k * log(p_k / q_k)
+  # = sum_k p_k * log(p_k) - sum_k p_k * log(q_k)
+  
+  # First term: sum_k p_k * log(p_k) for each row of P
+  P_log_P <- rowSums(P * log(P))  # n x 1
+  
+  # Second term: P * log(Q)^T = n x m matrix
+  P_log_Q <- P %*% t(log(Q))  # n x m
+  
+  # KL divergence matrix
+  # KL[i,j] = sum_k P[i,k] * log(P[i,k]) - sum_k P[i,k] * log(Q[j,k])
+  kl_matrix <- matrix(P_log_P, nrow = nrow(P), ncol = nrow(Q)) - P_log_Q
+  
+  kl_matrix
 }
 
 #' Compute Spatial Distance Matrix

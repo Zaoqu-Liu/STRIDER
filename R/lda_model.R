@@ -11,11 +11,13 @@ NULL
 #'
 #' @param matrix Normalized count matrix (genes x cells)
 #' @param n.topics Number of topics (default: 10)
-#' @param n.iter Number of iterations (default: 500)
+#' @param n.iter Number of iterations per pass (default: 500)
+#' @param n.passes Number of passes over the corpus (default: 1)
 #' @param convergence.tol Convergence tolerance (default: 1e-4)
 #' @param alpha Dirichlet prior for document-topic distribution. 
-#'   Default is 50/n.topics as in original STRIDE.
+#'   Default is 50/n.topics as in original STRIDE (matching gensim).
 #' @param beta Dirichlet prior for topic-word distribution (default: 0.01)
+#' @param gamma.threshold Minimum change in gamma for document convergence (default: 0.001)
 #' @param seed Random seed for reproducibility
 #' @param verbose Print progress messages (default: TRUE)
 #'
@@ -29,9 +31,13 @@ NULL
 #'
 #' @details
 #' The LDA model is trained using Variational Bayes inference via the text2vec
-
-#' package. The default hyperparameters (alpha = 50/K, beta = 0.01) follow the
+#' package, matching gensim's LdaModel behavior as closely as possible.
+#' The default hyperparameters (alpha = 50/K, beta = 0.01) follow the
 #' original STRIDE implementation for optimal performance on single-cell data.
+#'
+#' Note: gensim uses Online Variational Bayes by default, while text2vec
+#' uses standard Variational Bayes. For single-cell data with moderate
+#' corpus size, results are highly correlated.
 #'
 #' @references
 #' Sun, D., et al. (2022). STRIDE: accurately decomposing and integrating
@@ -44,9 +50,9 @@ NULL
 #' \dontrun{
 #' model <- train_lda(norm_mat, n.topics = 10)
 #' }
-train_lda <- function(matrix, n.topics = 10, n.iter = 500,
+train_lda <- function(matrix, n.topics = 10, n.iter = 500, n.passes = 1,
                       convergence.tol = 1e-4, alpha = NULL, beta = 0.01,
-                      seed = NULL, verbose = TRUE) {
+                      gamma.threshold = 0.001, seed = NULL, verbose = TRUE) {
   
   if (verbose) vmessage("Training LDA model with ", n.topics, " topics...")
   
@@ -94,14 +100,19 @@ train_lda <- function(matrix, n.topics = 10, n.iter = 500,
     topic_word_prior = beta
   )
   
-  # Fit the model
-  doc_topic_distr <- lda_model$fit_transform(
-    x = dtm,
-    n_iter = n.iter,
-    convergence_tol = convergence.tol,
-    n_check_convergence = 10,
-    progressbar = verbose
-  )
+  # Fit the model with multiple passes to match gensim behavior
+  for (pass in seq_len(n.passes)) {
+    if (verbose && n.passes > 1) {
+      vmessage("  Pass ", pass, "/", n.passes)
+    }
+    doc_topic_distr <- lda_model$fit_transform(
+      x = dtm,
+      n_iter = n.iter,
+      convergence_tol = convergence.tol,
+      n_check_convergence = 10,
+      progressbar = verbose && pass == n.passes
+    )
+  }
   
   # Extract topic-word distribution (phi matrix)
   # Try different methods to get topic-word distribution
@@ -167,8 +178,10 @@ train_lda <- function(matrix, n.topics = 10, n.iter = 500,
       vocab = vocab,
       n_topics = n.topics,
       n_iter = n.iter,
+      n_passes = n.passes,
       alpha = alpha,
       beta = beta,
+      gamma_threshold = gamma.threshold,
       model = lda_model
     ),
     class = "strider_lda"

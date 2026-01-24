@@ -8,9 +8,11 @@ train_lda(
   matrix,
   n.topics = 10,
   n.iter = 500,
+  n.passes = 1,
   convergence.tol = 1e-04,
   alpha = NULL,
   beta = 0.01,
+  gamma.threshold = 0.001,
   seed = NULL,
   verbose = TRUE
 )
@@ -20,14 +22,18 @@ train_lda(
 
 \item{n.topics}{Number of topics (default: 10)}
 
-\item{n.iter}{Number of iterations (default: 500)}
+\item{n.iter}{Number of iterations per pass (default: 500)}
+
+\item{n.passes}{Number of passes over the corpus (default: 1)}
 
 \item{convergence.tol}{Convergence tolerance (default: 1e-4)}
 
 \item{alpha}{Dirichlet prior for document-topic distribution.
-Default is 50/n.topics as in original STRIDE.}
+Default is 50/n.topics as in original STRIDE (matching gensim).}
 
 \item{beta}{Dirichlet prior for topic-word distribution (default: 0.01)}
+
+\item{gamma.threshold}{Minimum change in gamma for document convergence (default: 0.001)}
 
 \item{seed}{Random seed for reproducibility}
 
@@ -49,8 +55,13 @@ and genes as words, following the methodology described in STRIDE.
 }
 \details{
 The LDA model is trained using Variational Bayes inference via the text2vec
-package. The default hyperparameters (alpha = 50/K, beta = 0.01) follow the
+package, matching gensim's LdaModel behavior as closely as possible.
+The default hyperparameters (alpha = 50/K, beta = 0.01) follow the
 original STRIDE implementation for optimal performance on single-cell data.
+
+Note: gensim uses Online Variational Bayes by default, while text2vec
+uses standard Variational Bayes. For single-cell data with moderate
+corpus size, results are highly correlated.
 }
 \examples{
 \dontrun{

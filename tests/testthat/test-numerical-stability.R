@@ -141,8 +141,9 @@ test_that("scale_data handles constant rows", {
   
   scaled <- scale_data(mat, center = FALSE, scale = TRUE)
   
-  # Variable row should be scaled
-  expect_true(abs(sd(scaled[2, ]) - 1) < 1e-6)
+  # Variable row should be scaled - use POPULATION SD (N) to match sklearn
+  pop_sd <- sqrt(mean((scaled[2, ] - mean(scaled[2, ]))^2))
+  expect_true(abs(pop_sd - 1) < 1e-6)
   
   # Should not contain NaN
   expect_true(all(is.finite(scaled)))

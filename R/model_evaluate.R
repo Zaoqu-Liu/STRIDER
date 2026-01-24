@@ -49,8 +49,10 @@ evaluate_model_prediction <- function(topic_cell, topic_celltype, true_celltypes
     col_sums[col_sums == 0] <- 1
     ct_weights <- sweep(celltype_topic, 2, col_sums, "/")
   } else if (method == "NormBySD") {
-    # Normalize by standard deviation
-    col_sds <- apply(celltype_topic, 2, stats::sd)
+    # Normalize by standard deviation (using N, not N-1, to match sklearn)
+    col_sds <- apply(celltype_topic, 2, function(x) {
+      sqrt(mean((x - mean(x))^2))  # Population SD (N), matching sklearn
+    })
     col_sds[col_sds == 0] <- 1
     ct_weights <- sweep(celltype_topic, 2, col_sds, "/")
   } else if (method == "Bayes") {

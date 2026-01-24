@@ -140,6 +140,8 @@ normalize_counts <- function(matrix, scale.factor = NULL, log.transform = FALSE)
 #' Scale Data by Standard Deviation
 #'
 #' @description Scale data by dividing by standard deviation (without centering).
+#'   Uses population SD (N) instead of sample SD (N-1) to match sklearn's
+#'   StandardScaler(with_mean=False) used in Python STRIDE.
 #'
 #' @param matrix Normalized matrix (genes x cells/spots)
 #' @param center Center data (subtract mean) (default: FALSE)
@@ -167,17 +169,17 @@ scale_data <- function(matrix, center = FALSE, scale = TRUE) {
   }
   
   if (scale) {
-    # Calculate row-wise SD
+    # Calculate row-wise SD using POPULATION SD (N, not N-1) to match sklearn
     if (is_sparse(matrix)) {
       # For sparse matrices, compute SD without converting to dense
-      # SD = sqrt(E[X^2] - E[X]^2)
-      n <- ncol(matrix)
+      # Population SD = sqrt(E[X^2] - E[X]^2)
       row_means <- Matrix::rowMeans(matrix)
       row_sq_means <- Matrix::rowMeans(matrix^2)
-      row_sds <- sqrt(row_sq_means - row_means^2)
-      row_sds <- sqrt(row_sds^2 * n / (n - 1))  # Correct for sample SD
+      row_sds <- sqrt(row_sq_means - row_means^2)  # Population SD (N)
     } else {
-      row_sds <- apply(matrix, 1, stats::sd)
+      # Population SD: sqrt(mean((x - mean(x))^2))
+      row_means <- rowMeans(matrix)
+      row_sds <- sqrt(rowMeans((matrix - row_means)^2))
     }
     
     # Avoid division by zero

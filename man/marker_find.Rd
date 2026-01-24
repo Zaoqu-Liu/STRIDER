@@ -4,5 +4,5 @@
 \alias{marker_find}
 \title{Marker Gene Identification for STRIDER}
 \description{
-Functions for identifying cell-type specific marker genes
+Functions for identifying cell-type specific marker genes.
 }

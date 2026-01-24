@@ -18,6 +18,8 @@ Scaled matrix
 }
 \description{
 Scale data by dividing by standard deviation (without centering).
+Uses population SD (N) instead of sample SD (N-1) to match sklearn's
+StandardScaler(with_mean=False) used in Python STRIDE.
 }
 \examples{
 \dontrun{

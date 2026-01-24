@@ -93,8 +93,8 @@ test_that("scale_data produces unit standard deviation", {
   
   scaled <- scale_data(mat, center = FALSE, scale = TRUE)
   
-  # Each row should have SD = 1
-  row_sds <- apply(scaled, 1, sd)
+  # Each row should have POPULATION SD = 1 (N, not N-1 to match sklearn)
+  row_sds <- apply(scaled, 1, function(x) sqrt(mean((x - mean(x))^2)))
   expect_true(all(abs(row_sds - 1) < 1e-6))
 })
 
@@ -114,8 +114,8 @@ test_that("scale_data with centering produces zero mean", {
   row_means <- rowMeans(scaled)
   expect_true(all(abs(row_means) < 1e-10))
   
-  # Each row should have SD = 1
-  row_sds <- apply(scaled, 1, sd)
+  # Each row should have POPULATION SD = 1 (N, not N-1 to match sklearn)
+  row_sds <- apply(scaled, 1, function(x) sqrt(mean((x - mean(x))^2)))
   expect_true(all(abs(row_sds - 1) < 1e-6))
 })
 

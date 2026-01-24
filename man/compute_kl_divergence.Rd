@@ -4,16 +4,19 @@
 \alias{compute_kl_divergence}
 \title{Compute KL Divergence Matrix}
 \usage{
-compute_kl_divergence(P, Q)
+compute_kl_divergence(P, Q, eps = 1e-10)
 }
 \arguments{
 \item{P}{First matrix (n x k), rows are distributions}
 
 \item{Q}{Second matrix (m x k), rows are distributions}
+
+\item{eps}{Small constant to avoid log(0) (default: 1e-10)}
 }
 \value{
 KL divergence matrix (n x m)
 }
 \description{
 Compute pairwise KL divergence between probability distributions.
+Matches the exact implementation in Python STRIDE's KLDivergency function.
 }
