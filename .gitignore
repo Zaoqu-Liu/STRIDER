@@ -30,8 +30,7 @@ Desktop.ini
 # Linux
 *~
 
-# Compiled documentation
-docs/
+# Compiled documentation (docs/ is the published pkgdown site, so it is tracked)
 doc/
 Meta/
 

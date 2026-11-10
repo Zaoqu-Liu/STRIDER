@@ -1,0 +1,14 @@
+url: https://zaoqu-liu.github.io/STRIDER/
+
+template:
+  bootstrap: 5
+
+home:
+  links:
+  - text: R-universe
+    href: https://zaoqu-liu.r-universe.dev/STRIDER
+
+navbar:
+  structure:
+    left:  [intro, reference, news]
+    right: [search, github]

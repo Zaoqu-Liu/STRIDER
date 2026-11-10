@@ -3,6 +3,7 @@
 <!-- badges: start -->
 [![R-universe](https://zaoqu-liu.r-universe.dev/badges/STRIDER)](https://zaoqu-liu.r-universe.dev/STRIDER)
 [![R-CMD-check](https://github.com/Zaoqu-Liu/STRIDER/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/Zaoqu-Liu/STRIDER/actions/workflows/R-CMD-check.yaml)
+[![Documentation](https://img.shields.io/badge/docs-pkgdown-blue.svg)](https://zaoqu-liu.github.io/STRIDER/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![GitHub issues](https://img.shields.io/github/issues/Zaoqu-Liu/STRIDER)](https://github.com/Zaoqu-Liu/STRIDER/issues)
 <!-- badges: end -->

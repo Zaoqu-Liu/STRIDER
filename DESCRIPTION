@@ -20,7 +20,7 @@ Description: STRIDER (Spatial Transcriptomics deconvolutIon and integration in R
     to work seamlessly with Seurat objects (v4 and v5) and supports various 
     input formats including 10X Genomics HDF5 files.
 License: MIT + file LICENSE
-URL: https://github.com/Zaoqu-Liu/STRIDER
+URL: https://zaoqu-liu.github.io/STRIDER/, https://github.com/Zaoqu-Liu/STRIDER
 BugReports: https://github.com/Zaoqu-Liu/STRIDER/issues
 Encoding: UTF-8
 RoxygenNote: 7.3.3
